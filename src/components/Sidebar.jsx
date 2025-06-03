@@ -1,5 +1,7 @@
 import React from 'react';
 import { FaBell } from "react-icons/fa";
+import { GoBook } from "react-icons/go";
+import { MdOutlineAnalytics } from "react-icons/md";
 import { useNavigate } from 'react-router-dom';
 import {
   FiPieChart,
@@ -13,19 +15,19 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const menuItems = [
     { icon: <FiPieChart className="w-[16px] h-[16px]" />, label: 'Overview', active: false },
-    { icon: <FiShield className="w-[16px] h-[16px]" />, label: 'Fraud Detection', active: false },
-    { icon: <FiCalendar className="w-[16px] h-[16px]" />, label: 'Attendance Management', active: false },
-    { icon: <FiUserX className="w-[16px] h-[16px]" />, label: 'Absence Management', active: false },
-    { icon: <FiFileText className="w-[16px] h-[16px]" />, label: 'Reports', active: false }
+    { icon: <FiShield className="w-[16px] h-[16px]" />, label: 'Fraud Detection', path: '/fraud-detection', active: false },
+    { icon: <FiCalendar className="w-[16px] h-[16px]" />, label: 'Attendance Management', path: '/attendance-management', active: false },
+    { icon: <FiUserX className="w-[16px] h-[16px]" />, label: 'Absence Management', path: '/absence-management', active: false },
+    { icon: <FiFileText className="w-[16px] h-[16px]" />, label: 'Reports', path: '/reports', active: false }
   ];
 
   const adminItems = [
-    { icon: <FiUserX className="w-[16px] h-[16px]" />, label: 'Manage Classes', active: true },
-    { icon: <FiFileText className="w-[16px] h-[16px]" />, label: 'Analytics', active: false }
+    { icon: <GoBook className="w-[16px] h-[16px]" />, label: 'Manage Classes', path: '/manage-classes', active: true },
+    { icon: <MdOutlineAnalytics className="w-[16px] h-[16px]" />, label: 'Analytics', path: '/analytics', active: false }
   ];
 
   return (
-    <div className="bg-[#18181b] h-[940px] w-[220px] flex-shrink-0 relative flex flex-col">
+    <div className="bg-[#18181b] h-[940px] w-[250px] flex-shrink-0 relative flex flex-col">
       {/* Logo and Title */}
       <div className="flex items-center absolute left-[30px] top-[8px]">
           <FaBell style={{ color: 'white', marginRight: '8px' }} />
@@ -42,16 +44,24 @@ const Sidebar = () => {
       </div>
 
        {/* Menu Items */}
-      <div className="absolute left-[16px] space-y-[24px]" style={{ marginTop: '110px' }}>
+      <div className="absolute left-[16px] right-0" style={{ marginTop: '100px' }}>
         {menuItems.map((item, index) => (
           <button
             key={index}
             onClick={() => navigate(item.path)}
-            className="flex items-center space-x-[10px] text-left focus:outline-none w-full transition-colors hover:bg-[#27272a]"
-            style={{ color: 'white', background: 'none', border: 'none', padding: 0 }}
+            className="flex items-center space-x-[10px] text-left focus:outline-none w-full transition-colors bg-[#18181b]
+            hover:bg-[#444] hover:border-l-4 hover:border-[#a1a1aa] active:bg-[#222]"
+            style={{
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              borderLeft: '10px solid transparent',
+              padding: 0,
+              cursor: 'pointer',
+            }}
           >
             {item.icon}
-            <span className="text-[14px] font-inter font-normal leading-[17px] text-left text-[#f4f4f5]">
+            <span className="text-[14px] font-inter font-normal leading-[17px] text-left text-[#f4f4f5] m-[10px]">
               {item.label}
             </span>
           </button>
@@ -59,23 +69,31 @@ const Sidebar = () => {
       </div>
 
       {/* Administration Section */}
-      <div className="absolute left-[16px] top-[320px]">
+      <div className="absolute left-[16px] top-[300px]">
         <h2 className="text-[14px] font-inter font-medium leading-[15px] text-left text-[#f4f4f5]">
           Administration
         </h2>
       </div>
 
       {/* Admin Items */}
-      <div className="absolute left-[16px] top-[326px] space-y-[24px]" style={{marginTop:'40px'}}>
+      <div className="absolute left-[16px] top-[300px] right-0" style={{marginTop:'40px'}}>
         {adminItems.map((item, index) => (
           <button
             key={index}
             onClick={() => navigate(item.path)}
-            className="flex items-center space-x-[10px] text-left focus:outline-none w-full transition-colors hover:bg-[#27272a]"
-            style={{ color: 'white', background: 'none', border: 'none', padding: 0 }}
+            className="flex items-center space-x-[10px] text-left focus:outline-none w-full transition-colors bg-[#18181b]
+            hover:bg-[#444] hover:border-l-4 hover:border-[#a1a1aa] active:bg-[#222]"
+            style={{
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              borderLeft: '10px solid transparent',
+              padding: 0,
+              cursor: 'pointer',
+            }}
           >
             {item.icon}
-            <span className="text-[14px] font-inter font-normal leading-[17px] text-left text-[#f4f4f5]">
+            <span className="text-[14px] font-inter font-normal leading-[17px] text-left text-[#f4f4f5] m-[10px]">
               {item.label}
             </span>
           </button>

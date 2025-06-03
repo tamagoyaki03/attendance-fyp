@@ -49,7 +49,7 @@ InputField.propTypes = {
   onChange: PropTypes.func,
   disabled: PropTypes.bool,
   className: PropTypes.string,
-  icon: PropTypes.string,
+  icon: PropTypes.node,
   iconPosition: PropTypes.oneOf(['left', 'right']),
 };
 
