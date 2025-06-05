@@ -66,12 +66,12 @@ const ManageClasses = () => {
   : [];
 
   return (
-    <div className="grid grid-cols-[250px_1fr] gap-[20px] max-h-screen bg-[#121212]">
-      <div className="fixed h-screen w-[250px]">
+    <div className="bg-[#121212] min-h-screen w-screen">
+      <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
         <Sidebar />
       </div>
       
-        <main className="col-start-2 p-[40px] ">
+        <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
           {/* Main Content Area */}
             <div>
               <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left text-[#fafafa] mb-[0px]">

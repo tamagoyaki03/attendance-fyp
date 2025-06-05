@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom";
-import { Card, CardContent, CardActions, Typography } from "@mui/material";
-import Button from "@mui/material/Button";
+import { Card, CardContent, Typography, Chip } from "@mui/material";
+import Box from "@mui/material/Box";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
-import Input from "@mui/material/Input";
-import Badge from "@mui/material/Badge";
 import Snackbar from "@mui/material/Snackbar";
 import MuiAlert from "@mui/material/Alert";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
@@ -21,11 +19,15 @@ import PersonRemoveIcon from "@mui/icons-material/PersonRemove";
 import GroupIcon from "@mui/icons-material/Group";
 import ErrorIcon from "@mui/icons-material/Error";
 import CancelIcon from "@mui/icons-material/Cancel";
-// import { AttendanceSessionQR } from "@/components/attendance-session-qr"
+import { FaSearch } from "react-icons/fa";
+import AttendanceSession from "../components/Event/AttendanceSession";
 // import { StudentAttendanceList } from "@/components/student-attendance-list"
 import StudentDetailsCard  from "../components/StudentDetailsCard"
 import Sidebar from "../components/Sidebar";
-// import { AttendanceStats } from "@/components/attendance-stats"
+import InputField from "../components/InputField";
+import supabase from "../config/supabaseClient";
+import  AttendanceStats  from "../components/AttendanceStats"
+import Button from "../components/Button";
 // import { FlaggedAttendanceList } from "@/components/flagged-attendance-list"
 
 export default function AttendanceManagementPage() {
@@ -34,46 +36,82 @@ export default function AttendanceManagementPage() {
 
   const searchParams = new URLSearchParams(location.search);
   const classId = searchParams.get("classId");
-
-  const [selectedClass, setSelectedClass] = useState(null)
+  const [classes, setClasses] = useState([]);
+  const [fetchError, setFetchError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedClass, setSelectedClass] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [sessionActive, setSessionActive] = useState(false)
   const [sessionStartTime, setSessionStartTime] = useState(null)
   const [sessionEndTime, setSessionEndTime] = useState(null)
   const [currentLocation, setCurrentLocation] = useState(null)
   const [selectedStudent, setSelectedStudent] = useState(null)
-  const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("present")
   const [qrDialogOpen, setQrDialogOpen] = useState(false)
   const [sessionType, setSessionType] = useState(null)
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "info" });
   const handleCloseSnackbar = () => setSnackbar({ ...snackbar, open: false });
+  const [addresses, setAddresses] = useState({});
+  const [now, setNow] = useState(Date.now());
 
-  // Sample class data
-  const classData = {
-    id: "cs101-spring23",
-    code: "CS101",
-    name: "Introduction to Computer Science",
-    schedule: "Mon, Wed, Fri 10:00 - 11:30",
-    location: "Building A, Room 101",
-    duration: 90,
-    lecturer: "Dr. Jane Smith",
-    totalStudents: 45,
-    presentCount: 38,
-    absentCount: 7,
-    tardyCount: 3,
-    flaggedCount: 2,
-  }
+useEffect(() => {
+  if (!sessionActive) return;
+  const interval = setInterval(() => setNow(Date.now()), 1000);
+  return () => clearInterval(interval);
+}, [sessionActive]);
 
   useEffect(() => {
-    const classId = searchParams.get("classId")
-    if (classId) {
-      setIsLoading(true)
-      setTimeout(() => {
-        setSelectedClass(classData)
-        setIsLoading(false)
-      }, 500)
+  const fetchClasses = async () => {
+    setIsLoading(true);
+    const { data, error } = await supabase.from('classes').select('*');
+    if (error) {
+      setFetchError('Could not fetch classes');
+      setClasses([]);
+    } else {
+      // Calculate duration in minutes for each class
+      const classesWithDuration = (data || []).map(cls => {
+        if (cls.start_time && cls.end_time) {
+          // Parse as "HH:mm" or "HH:mm:ss"
+          const [sh, sm] = cls.start_time.split(':').map(Number);
+          const [eh, em] = cls.end_time.split(':').map(Number);
+          const start = sh * 60 + sm;
+          const end = eh * 60 + em;
+          let duration = end - start;
+          if (duration < 0) duration += 24 * 60; // handle overnight classes
+          return { ...cls, duration };
+        }
+        return { ...cls, duration: 0 };
+      });
+      setClasses(classesWithDuration);
+      setFetchError(null);
     }
-  }, [searchParams])
+    setIsLoading(false);
+  };
+  fetchClasses();
+}, []);
+
+  useEffect(() => {
+    // Fetch addresses for classes with lat/long but no location string
+    classes.forEach(async (cls) => {
+      if (
+        (!cls.location || cls.location.trim() === "") &&
+        cls.lat && cls.long &&
+        !addresses[cls.id]
+      ) {
+        const address = await getAddressFromLatLng(cls.lat, cls.long);
+        setAddresses((prev) => ({ ...prev, [cls.id]: address }));
+      }
+    });
+  }, [classes, addresses]);
+
+  useEffect(() => {
+  if (classId && classes.length > 0) {
+    const found = classes.find((cls) => String(cls.id) === String(classId));
+    setSelectedClass(found || null);
+  } else {
+    setSelectedClass(null); // <-- Add this line
+  }
+}, [classId, classes]);
 
   const getCurrentLocation = () => {
     return new Promise((resolve, reject) => {
@@ -89,33 +127,41 @@ export default function AttendanceManagementPage() {
     })
   }
 
+  function formatDuration(start) {
+  if (!start) return "0:00";
+  const diff = Math.floor((now - start.getTime()) / 1000);
+  const mins = Math.floor(diff / 60);
+  const secs = diff % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
   const handleStartSession = async () => {
     setIsLoading(true)
     try {
       const position = await getCurrentLocation()
-      const location = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-      }
-      setCurrentLocation(location)
-      setSessionStartTime(new Date())
-      setSessionActive(true)
-      setSessionType("start")
-      setQrDialogOpen(true)
-      setSnackbar({
-        open: true,
-        message: `Attendance session started. Location captured: ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`,
-        severity: "success",
-      })
-    } catch (error) {
-      setSnackbar({
-        open: true,
-        message: "Failed to start session. Could not access your location.",
-        severity: "error",
-      })
-    } finally {
-      setIsLoading(false)
+    const location = {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
     }
+    setCurrentLocation(location)
+    setSessionStartTime(new Date())
+    setSessionActive(true)
+    setSessionType("start")
+    setQrDialogOpen(true)
+    setSnackbar({
+      open: true,
+      message: `Attendance session started.`,
+      severity: "success",
+    })
+  } catch (error) {
+    setSnackbar({
+      open: true,
+      message: "Failed to start session.",
+      severity: "error",
+    })
+  } finally {
+    setIsLoading(false)
+  }
   }
 
   const handleEndSession = async () => {
@@ -156,6 +202,19 @@ export default function AttendanceManagementPage() {
     })
   }
 
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
+
+  const handleSessionExpire = () => {
+   setQrDialogOpen(false);
+   setSnackbar({
+    open: true,
+    message: "QR code expired. Please generate a new QR or finalize the session.",
+    severity: "info",
+  });
+};
+
   const handleSelectStudent = (student) => setSelectedStudent(student)
   const handleCloseStudentDetails = () => setSelectedStudent(null)
   const handleMarkPresent = (studentId) => {
@@ -181,6 +240,20 @@ export default function AttendanceManagementPage() {
       })
     }, 1500)
   }
+
+  async function getAddressFromLatLng(lat, lng) {
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
+  );
+  const data = await response.json();
+  return data.display_name || `${lat}, ${lng}`;
+}
+
+const filteredClasses = classes.filter(
+  (cls) =>
+    cls.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    cls.code?.toLowerCase().includes(searchTerm.toLowerCase())
+);
 
   useEffect(() => {
     if (sessionActive && sessionStartTime && selectedClass) {
@@ -211,12 +284,9 @@ export default function AttendanceManagementPage() {
   if (isLoading && !selectedClass) {
     return (
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold tracking-tight">Attendance Management</h2>
-        </div>
         <div className="flex h-[400px] items-center justify-center">
           <div className="flex flex-col items-center gap-2">
-            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+            <AutorenewIcon className="h-8 w-8 animate-spin text-muted-foreground" />
             <p className="text-muted-foreground">Loading class data...</p>
           </div>
         </div>
@@ -235,44 +305,62 @@ export default function AttendanceManagementPage() {
                 <h2 className="text-3xl font-bold tracking-tight">Attendance Management</h2>
             </div>
         
-            <div className="grid gap-[40px] grid-cols-2">
-                <Card className="border color-[#e5e7eb]" style={{ background: "#09090b" }}>
-                <div>
-                    <Typography>Select a Class</Typography>
-                    <Typography>Please select a class to manage attendance</Typography>
+            <div>
+                <Card className="border color-[#e5e7eb] w-full" style={{ background: "#09090b"}}>
+                <div className="pb-2 m-[20px] mb-[0px]">
+                    <Typography variant="h6" component="div">Select a Class</Typography>
+                    <Typography variant="body2" color="text.secondary">Please select a class to manage attendance</Typography>
                 </div>
                 <CardContent>
                     <div className="space-y-4">
                     <div className="relative">
-                        <SearchIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input type="search" placeholder="Search classes..." className="pl-8" />
+                        <InputField
+                            id="search-classes"
+                            placeholder="Search classes..."
+                            value={searchTerm}
+                            onChange={handleSearchChange}
+                            icon={<FaSearch className='text-[#ffffff] w-[16px] h-[16px]' />}
+                            iconPosition="left"
+                            className="flex-1 h-[40px] pl-10 w-full"
+                        />
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                        {[classData].map((cls) => (
-                        <Card
-                            key={cls.id}
-                            className="cursor-pointer hover:bg-muted/50"
-                            onClick={() => router.push(`/attendance-management?classId=${cls.id}`)}
-                        >
-                            <div className="p-4">
-                            <Typography className="text-lg">
-                                {cls.code}: {cls.name}
-                            </Typography>
-                            <Typography>{cls.schedule}</Typography>
-                            </div>
-                            <CardContent className="p-4 pt-0">
-                            <div className="flex items-center text-sm text-muted-foreground">
-                                <LocationOnIcon className="mr-1 h-4 w-4" />
-                                {cls.location}
-                            </div>
-                            <div className="flex items-center text-sm text-muted-foreground mt-1">
-                                <GroupIcon className="mr-1 h-4 w-4" />
-                                {cls.totalStudents} students
-                            </div>
-                            </CardContent>
-                        </Card>
-                        ))}
-                    </div>
+                        {filteredClasses.map((cls) => (
+                            <Card 
+                                key={cls.id}
+                                className="cursor-pointer hover:bg-muted/50 border mt-[20px]" 
+                                style={{ background: "#09090b" }}
+                                onClick={() => router(`/attendance-management?classId=${cls.id}`)}
+                                >
+                                <div className="p-4 m-[15px]">
+                                    <h4 className="mb-[0px] text-[18px]">
+                                    {cls.code}: {cls.name}
+                                    </h4>
+                                    {/* Display class schedule */}
+                                    <Typography color="text.secondary">
+                                    {cls.day && cls.start_time && cls.end_time
+                                        ? `${cls.day}, ${cls.start_time.slice(0,5)} - ${cls.end_time.slice(0,5)}`
+                                        : "No schedule info"}
+                                    </Typography>
+                                </div>
+                                <CardContent style={{ paddingTop: "5px" }}>
+                                    {/* Display class location */}
+                                    <div className="flex items-center text-sm" style={{ color: "#a1a1aa" }}>
+                                        <LocationOnIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
+                                        {cls.location && cls.location.trim() !== ""
+                                        ? cls.location
+                                        : (cls.lat && cls.long
+                                            ? (addresses[cls.id] || `Lat: ${Number(cls.lat).toFixed(5)}, Long: ${Number(cls.long).toFixed(5)}`)
+                                            : "No location info")}
+                                    </div>
+                                    <div className="flex items-center text-sm mt-1" style={{ color: "#a1a1aa" }}>
+                                    <GroupIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
+                                    {(Array.isArray(cls.students) ? cls.students.length : 0)} students
+                                    </div>
+                                </CardContent>
+                            </Card>
+                            ))}
+                        </div>
                     </div>
                 </CardContent>
                 </Card>
@@ -283,99 +371,159 @@ export default function AttendanceManagementPage() {
   }
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">
-            {selectedClass.code}: {selectedClass.name}
-          </h2>
-          <p className="text-muted-foreground">
-            {selectedClass.schedule} | {selectedClass.location}
-          </p>
+    <div className="grid grid-cols-[250px_1fr] gap-[40px] h-screen w-screen">
+        <div className="fixed h-screen w-[250px]">
+            <Sidebar />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={handleStartSession} disabled={sessionActive || isLoading} className="gap-2">
-            <QrCIcon className="h-4 w-4" />
-            Start Attendance
-          </Button>
-          <Button onClick={handleEndSession} disabled={!sessionActive || isLoading} variant="outline" className="gap-2">
-            <QrCodeIcon className="h-4 w-4" />
-            End Attendance
-          </Button>
-          <Button onClick={handleGenerateReport} variant="outline" className="gap-2">
-            <DownloadIcon className="h-4 w-4" />
-            Generate Report
-          </Button>
+      <div className="col-start-2 overflow-y-auto pt-[40px] pr-[40px]">
+        <div className="flex flex-row items-start justify-between flex-wrap gap-4 mb-4">
+            <div>
+            <h2 className="text-3xl font-bold tracking-tight mb-[0px]">
+                {selectedClass.code}: {selectedClass.name}
+            </h2>
+            <p className="text-muted-foreground m-[0px]" style={{ color: "#a1a1aa" }}>
+                {selectedClass.day && selectedClass.start_time && selectedClass.end_time
+                ? `${selectedClass.day}, ${selectedClass.start_time.slice(0,5)} - ${selectedClass.end_time.slice(0,5)}`
+                : "No schedule info"}
+            </p>
+            <p className="text-muted-foreground mt-[0px]" style={{ color: "#a1a1aa" }}>
+                {selectedClass.location && selectedClass.location.trim() !== ""
+                ? selectedClass.location
+                : (selectedClass.lat && selectedClass.long
+                    ? (addresses[selectedClass.id] || `Lat: ${Number(selectedClass.lat).toFixed(5)}, Long: ${Number(selectedClass.long).toFixed(5)}`)
+                    : "No location info")}
+            </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+            <Button
+                size="small"
+                onClick={handleStartSession}
+                disabled={sessionActive || isLoading}
+                className="gap-2 "
+            >
+                <QrCodeIcon className="h-4 w-4" />
+                Start Attendance
+            </Button>
+            <Button
+                size="small"
+                onClick={handleEndSession}
+                disabled={!sessionActive || isLoading}
+                variant="outline"
+                className="gap-2 ml-[8px]"
+            >
+                <QrCodeIcon className="h-4 w-4" />
+                End Attendance
+            </Button>
+            <Button
+                size="small"
+                onClick={handleGenerateReport}
+                variant="outline"
+                className="gap-2 ml-[8px]"
+            >
+                <DownloadIcon className="h-4 w-4" />
+                Generate Report
+            </Button>
+            </div>
         </div>
-      </div>
 
       {sessionActive && (
-        <Card className="border-green-500 dark:border-green-700">
-          <div className="bg-green-50 dark:bg-green-900/20">
-            <div className="flex items-center justify-between">
-              <Typography className="text-green-700 dark:text-green-400">Active Attendance Session</Typography>
-              <Badge className="bg-green-500">Live</Badge>
-            </div>
-            <Typography>Session started at {sessionStartTime?.toLocaleTimeString()}</Typography>
-          </div>
-          <CardContent className="p-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <AccessTimeIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">
-                    Duration: {sessionStartTime ? Math.floor((Date.now() - sessionStartTime.getTime()) / 60000) : 0}{" "}
-                    minutes
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CalendarTodayIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">
+        <Card
+            sx={{
+            border: '1px solid',
+            borderColor: '#4caf50',
+            marginTop: '10px',
+            backgroundColor: '#09090b',
+            }}
+        >
+            <Box
+            sx={{
+                backgroundColor: 'rgba(232, 245, 233, 0.1)' ,
+                // dark: { backgroundColor: '#1b5e20', opacity: 0.1 },
+                p: 2,
+            }}
+            >
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                <Typography sx={{ color: '#388e3c', dark: { color: '#66bb6a' }, fontWeight: 'bold', fontSize: '1.25rem' }}>
+                Active Attendance Session
+                </Typography>
+                <Chip sx={{ backgroundColor: '#4caf50', color: '#09090b' }} label="Live"/>
+            </Box>
+            <Typography color="text.secondary" >
+                Session started at {sessionStartTime?.toLocaleTimeString()}
+            </Typography>
+            </Box>
+
+            <CardContent sx={{ p: 2 }}>
+            <Box
+                sx={{
+                display: 'grid',
+                gap: 2,
+                gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+                }}
+            >
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <AccessTimeIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
+                    <Typography sx={{ fontSize: '0.875rem' }}>
+                        Duration: {formatDuration(sessionStartTime)}
+                    </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <CalendarTodayIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
+                    <Typography sx={{ fontSize: '0.875rem' }}>
                     {new Date().toLocaleDateString(undefined, {
-                      weekday: "long",
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
                     })}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <LocationOnIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm">
-                    Location:{" "}
+                    </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <LocationOnIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
+                    <Typography sx={{ fontSize: '0.875rem' }}>
+                    Location:{' '}
                     {currentLocation
-                      ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}`
-                      : "Unknown"}
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <PersonAddAlt1Icon className="h-4 w-4 text-green-500" />
-                  <span className="text-sm">Present: {selectedClass.presentCount} students</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <PersonRemoveIcon className="h-4 w-4 text-red-500" />
-                  <span className="text-sm">Absent: {selectedClass.absentCount} students</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <ErrorIcon className="h-4 w-4 text-amber-500" />
-                  <span className="text-sm">Flagged: {selectedClass.flaggedCount} check-ins</span>
-                </div>
-              </div>
-            </div>
-          </CardContent>
+                        ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}`
+                        : 'Unknown'}
+                    </Typography>
+                </Box>
+                </Box>
+
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PersonAddAlt1Icon sx={{ fontSize: 20, color: '#4caf50' }} />
+                    <Typography sx={{ fontSize: '0.875rem' }}>
+                    Present: {selectedClass.presentCount} students
+                    </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <PersonRemoveIcon sx={{ fontSize: 20, color: 'red' }} />
+                    <Typography sx={{ fontSize: '0.875rem' }}>
+                    Absent: {selectedClass.absentCount} students
+                    </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <ErrorIcon sx={{ fontSize: 20, color: '#ffbf00' }} />
+                    <Typography sx={{ fontSize: '0.875rem' }}>
+                    Flagged: {selectedClass.flaggedCount} check-ins
+                    </Typography>
+                </Box>
+                </Box>
+            </Box>
+            </CardContent>
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
+
+      <div className="grid gap-4 md:grid-cols-3 w-full mt-[20px]">
         <AttendanceStats classData={selectedClass} />
       </div>
 
-      <Card>
-        <div>
-            <Typography variant="h6">Student Attendance</Typography>
-            <Typography variant="body2">View and manage student attendance for this class</Typography>
+      <Card className="border mt-[20px] mb-[20px]" style={{ background: "#09090b" }}>
+        <div className="flex-1 ml-[20px]">
+            <h2 className="mb-[0px]">Student Attendance</h2>
+            <Typography variant="body2" color="text.secondary">View and manage student attendance for this class</Typography>
         </div>
         <CardContent>
           <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
@@ -383,7 +531,7 @@ export default function AttendanceManagementPage() {
             <Tab label={`Absent (${selectedClass.absentCount})`} value="absent" />
             <Tab label={`Flagged (${selectedClass.flaggedCount})`} value="flagged" />
           </Tabs>
-          {activeTab === "present" && (
+          {/* {activeTab === "present" && (
             <StudentAttendanceList status="present" onSelectStudent={handleSelectStudent} />
           )}
           {activeTab === "absent" && (
@@ -391,7 +539,7 @@ export default function AttendanceManagementPage() {
           )}
           {activeTab === "flagged" && (
             <FlaggedAttendanceList onSelectStudent={handleSelectStudent} />
-          )}
+          )} */}
           <StudentDetailsCard
             student={selectedStudent}
             onClose={handleCloseStudentDetails}
@@ -400,19 +548,21 @@ export default function AttendanceManagementPage() {
         </CardContent>
       </Card>
 
-      <AttendanceSessionQR
+      <AttendanceSession
         open={qrDialogOpen}
         onOpenChange={setQrDialogOpen}
         sessionType={sessionType}
         classData={selectedClass}
         location={currentLocation}
         onFinalize={handleFinalizeSession}
+        onExpire={handleSessionExpire}
       />
       <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar}>
         <MuiAlert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
             {snackbar.message}
         </MuiAlert>
     </Snackbar>
+</div>
     </div>
   )
 }

@@ -3,9 +3,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  CardActions,
-  CardMedia,
-  Avatar,
   Badge,
   Tabs,
   Tab,
@@ -93,24 +90,34 @@ export default function StudentDetailsCard({ student, onClose, onMarkPresent }) 
     return Math.round((present / total) * 100)
   }
 
+  if (!student) {
+    return (
+      <Card>
+        <CardContent>
+          <Typography variant="h6">No student selected</Typography>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between space-y-0">
         <div>
-          <CardTitle>Student Details</CardTitle>
-          <CardDescription>View and manage student attendance</CardDescription>
+          <h2>Student Details</h2>
+          <Typography>View and manage student attendance</Typography>
         </div>
         <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-4 w-4" />
+          <CloseIcon className="h-4 w-4" />
           <span className="sr-only">Close</span>
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col md:flex-row gap-4 items-start">
-          <Avatar className="h-16 w-16">
+          {/* <Avatar className="h-16 w-16">
             <AvatarImage src={`/placeholder.svg?height=64&width=64&text=${student.avatar}`} />
             <AvatarFallback>{student.avatar}</AvatarFallback>
-          </Avatar>
+          </Avatar> */}
 
           <div className="space-y-1 flex-1">
             <h3 className="text-xl font-semibold">{student.name}</h3>
@@ -161,7 +168,7 @@ export default function StudentDetailsCard({ student, onClose, onMarkPresent }) 
               <div className="grid grid-cols-2 gap-4">
                 <Card>
                   <CardHeader className="p-4 pb-2">
-                    <CardTitle className="text-sm font-medium">Attendance Rate</CardTitle>
+                    <h2 className="text-sm font-medium">Attendance Rate</h2>
                   </CardHeader>
                   <CardContent className="p-4 pt-0">
                     <div className="text-2xl font-bold">{getAttendanceRate()}%</div>
@@ -174,7 +181,7 @@ export default function StudentDetailsCard({ student, onClose, onMarkPresent }) 
 
                 <Card>
                   <CardHeader className="p-4 pb-2">
-                    <CardTitle className="text-sm font-medium">Tardiness</CardTitle>
+                    <h2 className="text-sm font-medium">Tardiness</h2>
                   </CardHeader>
                   <CardContent className="p-4 pt-0">
                     <div className="text-2xl font-bold">
@@ -187,7 +194,7 @@ export default function StudentDetailsCard({ student, onClose, onMarkPresent }) 
 
               <Card>
                 <CardHeader className="p-4 pb-2">
-                  <CardTitle className="text-sm font-medium">Notes</CardTitle>
+                  <h2 className="text-sm font-medium">Notes</h2>
                 </CardHeader>
                 <CardContent className="p-4 pt-0">
                   <p className="text-sm text-muted-foreground">
