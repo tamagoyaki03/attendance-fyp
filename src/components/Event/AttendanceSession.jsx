@@ -1,5 +1,6 @@
-import React, { useState, useEffect, Suspense} from "react";
+import React, { useState, useEffect, useRef} from "react";
 import {QRCodeSVG} from "qrcode.react";
+// import QRGenerator from "../Event/QRGenerator";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,17 @@ import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import QrCodeIcon from "@mui/icons-material/QrCode";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import Button from "../Button";
+import supabase from "../../config/supabaseClient";
+
+async function saveSessionPassword(type, id, password) {
+    // Choose table based on type
+    // const table = type === "course" ? "course_lecture" : "course_tutorial";
+    // Update the password field for the given id
+    await supabase
+      .from("attendance_session")
+      .update({ password })
+      .eq("id", id);
+  }
 
 export default function AttendanceSession({
   open,
@@ -22,39 +34,87 @@ export default function AttendanceSession({
   classData,
   onFinalize,
   onExpire, 
+  sessionPassword,
 }) {
-  const [qrValue, setQrValue] = useState("");
-  const URL = `https://your-app.com/checkin?classId=123&token=abc`; // Replace with actual URL generation logic
+  const [qrValue, setQrValue] = useState("")
   const [countdown, setCountdown] = useState(300);
   const [isExpired, setIsExpired] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [location, setLocation] = useState(null);
+  const creatingSession = useRef(false);
+
+  useEffect(() => {
+    if (open && classData?.id) {
+      const fetchLatestClassData = async () => {
+        // Determine table based on type
+        const table = classData.type === "Lecture" ? "course_lecture" : "course_tutorial";
+        const { data, error } = await supabase
+          .from(table)
+          .select("course_code, course_title")
+          .eq("id", classData.id)
+          .single();
+        if (data) {
+          setLatestClassInfo({
+            code: data.course_code,
+            name: data.course_title,
+          });
+        }
+      };
+      fetchLatestClassData();
+    }
+  }, [open, classData]);
 
   // Generate a QR code when the dialog opens
   useEffect(() => {
-    if (open && sessionType && location && classData) {
-      const qrData = {
-        classId: classData.id,
-        className: classData.name,
-        timestamp: currentTime.toISOString(),
-        location: {
-          lat: location.lat,
-          lng: location.lng,
-          radius: 50,
-        },
-        type: sessionType,
-        token:
-          Math.random().toString(36).substring(2, 15) +
-          Math.random().toString(36).substring(2, 15),
-        validUntil: new Date(Date.now() + 300 * 1000).toISOString(),
-      };
+    if (
+      open &&
+      sessionType === "start" &&
+      location &&
+      classData &&
+      sessionPassword &&
+      !creatingSession.current
+    ) {
+      const saved = localStorage.getItem("attendanceSession");
+      if (saved) {
+        const session = JSON.parse(saved);
+        // If session is still valid, do not create a new one
+        if (
+          session.classId === classData.id &&
+          Date.now() - session.startTime < 300 * 1000 // 5 minutes
+        ) {
+          return;
+        }
+      }
+      creatingSession.current = true; 
+      (async () => {
+        const qrString = `${classData.type}|${classData.id}|${sessionPassword}`; //change qr type
+        setQrValue(qrString);
+        setCountdown(300);
+        setIsExpired(false);
 
-      setQrValue(JSON.stringify(qrData));
-      setCountdown(300);
-      setIsExpired(false);
+        saveSessionPassword(classData.type, classData.id, sessionPassword);
+        // await createAttendanceSession(classData.id, classData.type, location, specialPassword);
+
+        // Save session to localStorage
+        const sessionData = {
+          classId: classData.id,
+          type: classData.type,
+          qrValue: qrString,
+          countdown: 300,
+          startTime: Date.now(),
+          sessionPassword,
+          location,
+        };
+        localStorage.setItem("attendanceSession", JSON.stringify(sessionData));
+      })();
     }
-    // eslint-disable-next-line
-  }, [open, sessionType, location, classData, currentTime]);
+  }, [open, sessionType, location, classData, sessionPassword]);
+
+  const [latestClassInfo, setLatestClassInfo] = useState({
+    code: classData?.code || "",
+    name: classData?.name || "",
+  });
+
 
   useEffect(() => {
   if (classData) {
@@ -99,27 +159,37 @@ export default function AttendanceSession({
     return () => clearInterval(timer);
   }, [open, sessionType, location, classData]);
 
-  const handleRefreshQR = () => {
-  const qrData = {
-    classId: classData.id,
-    className: classData.name,
-    timestamp: new Date().toISOString(),
-    location: {
-      lat: location.lat,
-      lng: location.lng,
-      radius: 50,
-    },
-    type: sessionType,
-    token:
-      Math.random().toString(36).substring(2, 15) +
-      Math.random().toString(36).substring(2, 15),
-    validUntil: new Date(Date.now() + 300 * 1000).toISOString(),
-  };
-  setQrValue(JSON.stringify(qrData));
-  setCountdown(300);
-  setIsExpired(false);
-};
+  useEffect(() => {
+  if (open && sessionType === "start" && classData) {
+    const saved = localStorage.getItem("attendanceSession");
+    if (saved) {
+      const session = JSON.parse(saved);
+      if (
+        session.classId === classData.id &&
+        Date.now() - session.startTime < 300 * 1000 // 5 minutes
+      ) {
+        setQrValue(session.qrValue);
+        setCountdown(300 - Math.floor((Date.now() - session.startTime) / 1000));
+        setIsExpired(false);
+        setLocation(session.location);
+      } else {
+        localStorage.removeItem("attendanceSession");
+      }
+    }
+  }
+}, [open, sessionType, classData]);
 
+useEffect(() => {
+  if (!open) {
+    creatingSession.current = false;
+  }
+}, [open]);
+
+  useEffect(() => {
+  if (qrValue) {
+    console.log("UPDATED QR VALUE:", qrValue);
+  }
+}, [qrValue]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -170,9 +240,9 @@ export default function AttendanceSession({
                 <Typography color="" align="center">
                   QR Code expired
                 </Typography>
-                <Button onClick={handleRefreshQR} variant="outlined" sx={{ mt: 2 }}>
+                {/* <Button onClick={handleRefreshQR} variant="outlined" sx={{ mt: 2 }}>
                   Generate New QR Code
-                </Button>
+                </Button> */}
               </Box>
             ) : (
               <>
@@ -183,16 +253,17 @@ export default function AttendanceSession({
                   borderColor="grey.400"
                   mb={2}
                 >
-                {/* <Suspense fallback={<div>Loading QR...</div>}> */}
+                  {qrValue && (
                     <QRCodeSVG
-                        value={typeof qrValue === "string" ? qrValue : ""} 
-                        size={300}
-                        bgColor="#fff"
-                        fgColor="#000"
-                        level="H"
-                        includeMargin={false}
-                />
-                {/* </Suspense> */}
+                      value={qrValue}
+                      size={300}
+                      bgColor="#fff"
+                      fgColor="#000"
+                      level="H"
+                      includeMargin={false}
+                    />
+                    // <QRGenerator></QRGenerator>
+                  )}
                 </Box>
                 <Chip
                   label={
@@ -201,7 +272,7 @@ export default function AttendanceSession({
                       Expires in {formatTime(countdown)}
                     </Box>
                   }
-                  color={countdown < 60 ? "error" : "primary"}
+                  color={countdown < 60 ? "error" : "success"}
                   sx={{
                     position: "absolute",
                     top: -16,
@@ -215,7 +286,7 @@ export default function AttendanceSession({
             <Box display="flex" justifyContent="space-between" mb={1}>
                 <Typography color="text.secondary">Class:</Typography>
                 <Typography>
-                    {classData?.code || "Unknown"} {classData?.name || "Unknown"}
+                    {classData?.course_code || "Unknown"} {classData?.course_title || "Unknown"}
                 </Typography>
             </Box>
 

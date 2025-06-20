@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import supabase from "../../config/supabaseClient";
 import {
   Dialog,
@@ -9,9 +9,18 @@ import {
   InputLabel,
 } from "@mui/material";
 import ScheduleInput from "../ScheduleInput";
-import LocationInput from "../LocationInput";
 import TextField from "@mui/material/TextField";
 import StudentSearch from "./StudentSearch";
+import MenuItem from "@mui/material/MenuItem";
+
+const DAY_TO_NUMBER = {
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+};
+
 
 const AddClassDialog = ({ open, onOpenChange, onClassAdded }) => {
   const [isLoading, setIsLoading] = useState(false)
@@ -24,11 +33,28 @@ const AddClassDialog = ({ open, onOpenChange, onClassAdded }) => {
     end_time: "",
     start_date: "",
     end_date: "",
-    lat: null,
-    long: null,
     students: [],
     location: "",
+    type: "",
   });
+  const [lecturers, setLecturers] = useState([]);
+
+useEffect(() => {
+  const fetchLecturers = async () => {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name')
+      .eq('role', 'lecturer');
+
+    if (error) {
+      console.error('Error fetching lecturers:', error);
+    } else {
+      setLecturers(data || []);
+    }
+  };
+
+  fetchLecturers();
+}, []);
 
   const handleClose = () => {
     document.activeElement && document.activeElement.blur();
@@ -44,67 +70,89 @@ const AddClassDialog = ({ open, onOpenChange, onClassAdded }) => {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setIsLoading(true)
+  e.preventDefault();
+  setIsLoading(true);
 
-    try {
-      const studentsArray = Array.isArray(formData.students)
-        ? formData.students.map((student) => student.id)
-        : [];
+  try {
+    const dayNumber = DAY_TO_NUMBER[formData.day]; // formData.day should be e.g. 'Monday'
 
-      const payload = {
-        code: formData.code,
-        name: formData.name,
-        lecturer: formData.lecturer,
-        day: formData.day,
-        start_time: formData.startTime,
-        end_time: formData.endTime,
-        start_date: formData.startDate,
-        end_date: formData.endDate,
-        lat: formData.lat,
-        long: formData.long,
-        students: Array.isArray(formData.students) ? formData.students.map(s => s.id) : [],
-      };
 
-      // const { data: user } = await supabase.auth.getUser(); //User authentication
-      console.log(payload);
+    // 2️⃣ Build the payload for course table (without students)
+    const payload = {
+      course_code: formData.code,
+      course_title: formData.name,
+      lecturer_id: formData.lecturer,
+      day_of_week: dayNumber,
+      lecture_start_time: formData.startTime,
+      lecture_end_time: formData.endTime,
+      lecture_start_date: formData.startDate,
+      lecture_end_date: formData.endDate,
+      lecture_location: formData.location
+    };
 
-      const { data, error } = await supabase
-        .from('classes')
-        .insert([payload]);
-      setIsLoading(false)
+    // 3️⃣ Choose table name by type
+    const courseTable =
+      formData.type === "Lecture" ? "course_lecture" : "course_tutorial";
+    const enrollmentTable =
+      formData.type === "Lecture" ? "enrollment_lecture" : "enrollment_tutorial";
 
-      if (error) {
-        console.error("Error adding class:", error);
-        return;
-      } else if (data) {
-        console.log("Class added successfully:", data);
-        if (onClassAdded) onClassAdded();
-      }
+    // 4️⃣ Insert course record
+    const { data: courseData, error: courseError } = await supabase
+      .from(courseTable)
+      .insert([payload])
+      .select(); // get the new row(s) back
 
-      if (onClassAdded) onClassAdded();
-      handleClose();
-
-      setFormData({
-        code: "",
-        name: "",
-        lecturer: "",
-        schedule: "",
-        start_time: "",
-        end_time: "",
-        start_date: "",
-        end_date: "",
-        lat: null,
-        long: null,
-        students: "",
-      });
-      onOpenChange(false);
-    } catch (error) {
-      console.error("Error adding class:", error.message, error.details, error.hint);
-      setIsLoading(false);
-      alert("An error occurred while adding the class. Please try again.");
+    if (courseError) {
+      console.error("Error adding course:", courseError);
+      throw courseError;
     }
+
+    // 5️⃣ Get the inserted course id
+    const courseId = courseData[0].id;
+
+    // 6️⃣ Insert enrollments for each student
+    const studentsArray = Array.isArray(formData.students)
+      ? formData.students.map((student) => ({
+          student_id: student.id,
+          [`course_id`]: courseId, // dynamically set FK
+        }))
+      : [];
+
+    if (studentsArray.length > 0) {
+      const { error: enrollmentError } = await supabase
+        .from(enrollmentTable)
+        .insert(studentsArray);
+
+      if (enrollmentError) {
+        console.error("Error adding enrollments:", enrollmentError);
+        throw enrollmentError;
+      }
+    }
+
+    // ✅ Done — show success
+    if (onClassAdded) onClassAdded();
+    handleClose();
+    setFormData({
+      code: "",
+      name: "",
+      lecturer: "",
+      day: "",
+      start_time: "",
+      end_time: "",
+      start_date: "",
+      end_date: "",
+      students: [],
+      location: "",
+      type: "",
+    });
+  } catch (error) {
+    console.error("Error adding class:", error.message, error.details, error.hint);
+    alert("An error occurred while adding the class. Please try again.");
+  } finally {
+    setIsLoading(false);
   }
+};
+
 
   return (
     <Dialog open={open} onClose={handleClose} style={{ color: "#09090B" }}>
@@ -186,17 +234,119 @@ const AddClassDialog = ({ open, onOpenChange, onClassAdded }) => {
             <div className="space-y-2">
               <InputLabel htmlFor="lecturer" sx={{ color: "#fafafa", marginTop: '10px' }}>Lecturer</InputLabel>
               <TextField
+                select
                 id="lecturer"
                 name="lecturer"
-                placeholder="e.g., Dr. John Smith"
+                placeholder="Select Lecturer"
                 value={formData.lecturer}
                 onChange={handleInputChange}
+                margin="normal"
                 required
                 style={{ width: '100%' }}
-                sx={{color: "#fafafa", backgroundColor: "#18181b", borderRadius: '8px', margin: '5px 0',
+                sx={{
+                  color: "#fafafa",
+                  backgroundColor: "#18181b",
+                  borderRadius: '8px',
+                  margin: '5px 0',
+                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                    borderColor: "#ffffff",
+                  },
+                  "& .MuiOutlinedInput-root": {
+                    "& fieldset": { borderColor: "#27272a" },
+                    "&:hover fieldset": { borderColor: "#fafafa" },
+                    "&.Mui-focused fieldset": { borderColor: "#fafafa" },
+                  },
+                  "& .MuiInputBase-input": {
+                    color: "#fafafa",
+                    paddingLeft: '10px',
+                    height: '15px'
+                  },
+                  "& input:-webkit-autofill": {
+                    WebkitBoxShadow: "0 0 0 1000px #18181b inset",
+                    WebkitTextFillColor: "#fafafa",
+                    transition: "background-color 5000s ease-in-out 0s",
+                  },
+                }}
+                inputProps={{ style: { paddingLeft: '10px' } }}
+                SelectProps={{ displayEmpty: true }}
+              >
+                {lecturers.length === 0 ? (
+                  <MenuItem disabled>Loading lecturers...</MenuItem>
+                ) : (
+                lecturers.map((lect) => (
+                  <MenuItem key={lect.id} value={lect.id}>
+                    {lect.name}
+                  </MenuItem>
+                ))
+              )}
+              </TextField>
+            </div>
+            <div className="space-y-2">
+              <InputLabel htmlFor="type" sx={{ color: "#fafafa" }}>Class Type</InputLabel>
+              <TextField
+                id="type"
+                name="type"
+                select
+                value={formData.type}
+                onChange={handleInputChange}
+                required
+                sx={{
+                  color: "#fafafa",
+                  backgroundColor: "#18181b",
+                  borderRadius: '8px',
+                  margin: '5px 0',
+                  "& .MuiInputLabel-root.Mui-focused": { color: "#ffffff" },
+                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#ffffff" },
+                  "& .MuiOutlinedInput-root": {
+                    "& fieldset": { borderColor: "#27272a" },
+                    "&:hover fieldset": { borderColor: "#fafafa" },
+                    "&.Mui-focused fieldset": { borderColor: "#fafafa" },
+                  },
+                  "& .MuiInputBase-input": {
+                    color: "#fafafa",
+                    paddingLeft: '10px',
+                    height: '15px'
+                  },
+                  "& input:-webkit-autofill": {
+                    WebkitBoxShadow: "0 0 0 1000px #18181b inset",
+                    WebkitTextFillColor: "#fafafa",
+                    transition: "background-color 5000s ease-in-out 0s",
+                  },
+                }}
+                inputProps={{ style: { paddingLeft: '10px' } }}
+                SelectProps={{ displayEmpty: true }}
+              >
+                <MenuItem value="" disabled>Select type</MenuItem>
+                <MenuItem value="Lecture">Lecture</MenuItem>
+                <MenuItem value="Tutorial">Tutorial</MenuItem>
+              </TextField>
+            </div>
+            <div className="space-y-2">
+              <ScheduleInput 
+                formData={formData} 
+                handleInputChange={handleInputChange}
+                setFormData={setFormData}
+              />
+            </div>
+            <div className="space-y-2" style={{ marginTop: '20px' }}>
+              <div className="space-y-2" style={{ marginTop: '20px' }}>
+                <InputLabel htmlFor="location" sx={{ color: "#fafafa" }}>Location</InputLabel>
+                <TextField
+                  id="location"
+                  name="location"
+                  placeholder="e.g., Room 101"
+                  value={formData.location}
+                  onChange={handleInputChange}
+                  required
+                  style={{ width: '100%' }}
+                  sx={{
+                    color: "#fafafa",
+                    backgroundColor: "#18181b",
+                    borderRadius: '8px',
+                    margin: '5px 0',
                     "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
                       borderColor: "#ffffff",
-                      },
+                    },
                     "& .MuiOutlinedInput-root": {
                       "& fieldset": { borderColor: "#27272a" },
                       "&:hover fieldset": { borderColor: "#fafafa" },
@@ -213,22 +363,9 @@ const AddClassDialog = ({ open, onOpenChange, onClassAdded }) => {
                       transition: "background-color 5000s ease-in-out 0s",
                     },
                   }}
-                inputProps={{ style: { paddingLeft: '10px' } }}
-              />
-            </div>
-            <div className="space-y-2">
-              <ScheduleInput 
-                formData={formData} 
-                handleInputChange={handleInputChange}
-                setFormData={setFormData}
-              />
-            </div>
-            <div className="space-y-2" style={{ marginTop: '20px' }}>
-              <LocationInput
-                formData={formData}
-                handleInputChange={handleInputChange}
-                setFormData={setFormData}
-              />
+                  inputProps={{ style: { paddingLeft: '10px' } }}
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <StudentSearch

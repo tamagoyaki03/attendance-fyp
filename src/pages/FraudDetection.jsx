@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -14,16 +14,32 @@ import InputField from "../components/InputField";
 import Sidebar from "../components/Sidebar";
 import FraudTable from "../components/FraudTable";
 import { FaSearch } from "react-icons/fa";
+import supabase from "../config/supabaseClient"; 
 
 export default function FraudDetection() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [course, setCourse] = useState("cs101");
+  const [course, setCourse] = useState("");
   const [session, setSession] = useState("current");
   const [distance, setDistance] = useState(1.0);
+  const [courses, setCourses] = useState([]);
 
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
   };
+
+  useEffect(() => {
+    // Fetch courses/classes from Supabase
+    const fetchCourses = async () => {
+      const { data, error } = await supabase
+        .from('classes') 
+        .select('id, code, name');
+      if (!error && data) {
+        setCourses(data);
+        if (data.length > 0) setCourse(data[0].id); // Set default selected course
+      }
+    };
+    fetchCourses();
+  }, []);
 
   return (
     <div className="grid grid-cols-[250px_1fr] gap-[40px] h-screen w-screen bg-[#121212]">
@@ -55,13 +71,14 @@ export default function FraudDetection() {
                             label="Course"
                             onChange={e => setCourse(e.target.value)}
                         >
-                            <MenuItem value="cs101">CS101 - Intro to Programming</MenuItem>
-                            <MenuItem value="cs202">CS202 - Data Structures</MenuItem>
-                            <MenuItem value="math303">MATH303 - Calculus</MenuItem>
-                            <MenuItem value="eng101">ENG101 - English Composition</MenuItem>
+                            {courses.map(cls => (
+                              <MenuItem key={cls.id} value={cls.id}>
+                                {cls.code} - {cls.name}
+                              </MenuItem>
+                            ))}
                         </Select>
                         </FormControl>
-                        <FormControl fullWidth style={{marginTop: '20px'}}>
+                        {/* <FormControl fullWidth style={{marginTop: '20px'}}>
                         <InputLabel id="session-label">Session</InputLabel>
                         <Select
                             labelId="session-label"
@@ -75,7 +92,7 @@ export default function FraudDetection() {
                             <MenuItem value="afternoon">Afternoon (2:00 PM)</MenuItem>
                             <MenuItem value="evening">Evening (6:00 PM)</MenuItem>
                         </Select>
-                        </FormControl>
+                        </FormControl> */}
                     </div>
                     <div className="space-y-1" style={{marginTop: '10px'}}>
                         <InputLabel htmlFor="distance">Max Distance (km)</InputLabel>
@@ -103,13 +120,11 @@ export default function FraudDetection() {
                 </div>
                 <CardContent>
                     <div className="grid gap-2">
-                    <div className="space-y-1">
+                    <div className="space-y-1 ">
                         <InputLabel htmlFor="buffer">Late Buffer (minutes)</InputLabel>
-                        <TextField id="buffer" type="number" defaultValue="5" min="0" max="30" />
-                    </div>
-                    <div className="space-y-1 mb-[10px]">
-                        <InputLabel htmlFor="early-departure" style={{ marginTop: '10px' }}>Early Departure Threshold (minutes)</InputLabel>    
-                        <TextField id="early-departure" type="number" defaultValue="10" min="0" max="60" />
+                        <div className="mb-[20px]">
+                            <TextField id="buffer" type="number" defaultValue="5" min="0" max="30" />
+                        </div>
                     </div>
                     <Button className="w-full" style={{color: "#09090b", backgroundColor: "#ffffff"}}>Update Settings</Button>
                     </div>
@@ -137,7 +152,7 @@ export default function FraudDetection() {
                         </div>
                     </div>
                 </div>
-                <CardContent><FraudTable /></CardContent>
+                <CardContent><FraudTable searchTerm={searchTerm}  /></CardContent>
             </Card>
         </div>
     </div>

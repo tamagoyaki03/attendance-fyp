@@ -1,4 +1,4 @@
-import React, { useState, useEffect} from "react";
+import React, { useState, useEffect } from "react";
 import supabase from "../../config/supabaseClient";
 import {
   Dialog,
@@ -9,13 +9,44 @@ import {
   InputLabel,
 } from "@mui/material";
 import ScheduleInput from "../ScheduleInput";
-import LocationInput from "../LocationInput";
 import TextField from "@mui/material/TextField";
 import StudentSearch from "./StudentSearch";
 import dayjs from "dayjs";
+import MenuItem from "@mui/material/MenuItem";
 
-const EditClassDialog = ({ open, onOpenChange, onClassAdded, classData }) => {
-  const [isLoading, setIsLoading] = useState(false)
+const DAY_TO_NUMBER = {
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+};
+
+const style ={color: "#fafafa",
+                  backgroundColor: "#18181b",
+                  borderRadius: "8px",
+                  margin: "5px 0",
+                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+                    borderColor: "#ffffff",
+                  },
+                  "& .MuiOutlinedInput-root": {
+                    "& fieldset": { borderColor: "#27272a" },
+                    "&:hover fieldset": { borderColor: "#fafafa" },
+                    "&.Mui-focused fieldset": { borderColor: "#fafafa" },
+                  },
+                  "& .MuiInputBase-input": {
+                    color: "#fafafa",
+                    paddingLeft: "10px",
+                    height: "15px",
+                  },
+                  "& input:-webkit-autofill": {
+                    WebkitBoxShadow: "0 0 0 1000px #18181b inset",
+                    WebkitTextFillColor: "#fafafa",
+                    transition: "background-color 5000s ease-in-out 0s",
+                  }}
+
+const EditClassDialog = ({ open, onOpenChange, onClassAdded, classData, lecturers }) => {
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     code: "",
     name: "",
@@ -25,81 +56,72 @@ const EditClassDialog = ({ open, onOpenChange, onClassAdded, classData }) => {
     endTime: "",
     startDate: "",
     endDate: "",
-    lat: null,
-    long: null,
     students: [],
     location: "",
+    type: "",
   });
 
+  // Fetch students enrolled in this class
   useEffect(() => {
-  if (classData) {
-    setFormData({
-      code: classData.code || "",
-      name: classData.name || "",
-      lecturer: classData.lecturer || "",
-      day: classData.day || "",
-      startTime: classData.start_time ? classData.start_time.slice(0, 5) : "",
-      endTime: classData.end_time ? classData.end_time.slice(0, 5) : "",
-      startDate: classData.start_date ? dayjs(classData.start_date) : null,
-      endDate: classData.end_date ? dayjs(classData.end_date) : null,
-      lat: classData.lat !== undefined && classData.lat !== null ? Number(classData.lat) : null,
-      long: classData.long !== undefined && classData.long !== null ? Number(classData.long) : null,
-      students: [], 
-      location: "", 
-    });
-    
-    const fetchDetails = async () => {
-      let students = [];
-      if (Array.isArray(classData.students) && classData.students.length > 0) {
-        const { data, error } = await supabase
-          .from('users')
-          .select('id, name')
-          .in('id', classData.students);
-        students = error ? classData.students.map(id => ({ id, name: id })) : data;
-      }
+    if (classData) {
+      // Determine type and table names
+      const isLecture = classData.type === "Lecture";
+      const courseTable = isLecture ? "course_lecture" : "course_tutorial";
+      const enrollmentTable = isLecture ? "enrollment_lecture" : "enrollment_tutorial";
+      const courseIdField = isLecture ? "course_id" : "tutorial_id";
 
-      let locationName = "";
-      if (
-        classData.lat !== undefined &&
-        classData.lat !== null &&
-        classData.long !== undefined &&
-        classData.long !== null
-      ) {
-        locationName = await fetchLocationName(Number(classData.lat), Number(classData.long));
-      }
+      // Set initial form data
+      setFormData({
+        code: classData.course_code || "",
+        name: classData.course_title || "",
+        lecturer: classData.lecturer_id || "",
+        day: classData.day_of_week
+          ? Object.keys(DAY_TO_NUMBER).find(
+              (k) => DAY_TO_NUMBER[k] === classData.day_of_week
+            ) || ""
+          : "",
+        startTime: classData.lecture_start_time
+          ? classData.lecture_start_time.slice(0, 5)
+          : "",
+        endTime: classData.lecture_end_time
+          ? classData.lecture_end_time.slice(0, 5)
+          : "",
+        startDate: classData.lecture_start_date
+          ? dayjs(classData.lecture_start_date)
+          : null,
+        endDate: classData.lecture_end_date
+          ? dayjs(classData.lecture_end_date)
+          : null,
+        students: [],
+        location: classData.lecture_location || "",
+        type: classData.type || "",
+      });
 
-      setFormData(prev => ({
-        ...prev,
-        students,
-        location: locationName,
-      }));
-    };
+      // Fetch enrolled students
+      const fetchEnrolledStudents = async () => {
+        const { data: enrollments, error: enrollError } = await supabase
+          .from(enrollmentTable)
+          .select("student_id")
+          .eq(courseIdField, classData.id);
 
-    fetchDetails();
-  }
-}, [classData, open]);
+        let students = [];
+        if (enrollments && enrollments.length > 0) {
+          const studentIds = enrollments.map((e) => e.student_id);
+          const { data: users, error: userError } = await supabase
+            .from("users")
+            .select("id, name")
+            .in("id", studentIds);
+          students = users || [];
+        }
+        setFormData((prev) => ({
+          ...prev,
+          students,
+        }));
+      };
 
-useEffect(() => {
-  if (formData.lat && formData.long) {
-    fetchLocationName(formData.lat, formData.long).then((locationName) => {
-      setFormData((prev) => ({
-        ...prev,
-        location: locationName,
-      }));
-    });
-  }
-  // eslint-disable-next-line
-}, [formData.lat, formData.long]);
-
-async function fetchLocationName(lat, lon) {
-  if (lat == null || lon == null) return "";
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
-  );
-  if (!response.ok) return "";
-  const data = await response.json();
-  return data.display_name || "";
-}
+      fetchEnrolledStudents();
+    }
+  }, [classData, open]);
 
   const handleClose = () => {
     document.activeElement && document.activeElement.blur();
@@ -116,67 +138,99 @@ async function fetchLocationName(lat, lon) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsLoading(true)
+    setIsLoading(true);
 
     try {
-      const studentsArray = Array.isArray(formData.students)
-        ? formData.students.map((student) => student.id)
-        : [];
+      const isLecture = formData.type === "Lecture";
+      const courseTable = isLecture ? "course_lecture" : "course_tutorial";
+      const enrollmentTable = isLecture ? "enrollment_lecture" : "enrollment_tutorial";
+      const courseIdField = isLecture ? "course_id" : "tutorial_id";
 
+      const dayNumber = DAY_TO_NUMBER[formData.day];
+
+      // Build payload for course table
       const payload = {
-        code: formData.code,
-        name: formData.name,
-        lecturer: formData.lecturer,
-        day: formData.day,
-        start_time: formData.startTime,
-        end_time: formData.endTime,
-        start_date: formData.startDate ? formData.startDate.format("YYYY-MM-DD") : null,
-        end_date: formData.endDate ? formData.endDate.format("YYYY-MM-DD") : null,
-        lat: formData.lat,
-        long: formData.long,
-        students: studentsArray,
+        course_code: formData.code,
+        course_title: formData.name,
+        lecturer_id: formData.lecturer,
+        day_of_week: dayNumber,
+        lecture_start_time: formData.startTime,
+        lecture_end_time: formData.endTime,
+        lecture_start_date: formData.startDate
+          ? formData.startDate.format("YYYY-MM-DD")
+          : null,
+        lecture_end_date: formData.endDate
+          ? formData.endDate.format("YYYY-MM-DD")
+          : null,
+        lecture_location: formData.location,
       };
 
-      // const { data: user } = await supabase.auth.getUser(); //User authentication 
-      console.log(payload);   
-
+      // Update course
       const { data, error } = await supabase
-        .from('classes')
+        .from(courseTable)
         .update(payload)
-        .eq('id', classData.id)
+        .eq("id", classData.id)
         .select();
 
-        setIsLoading(false);
-
       if (error) {
-        console.error("Error updating class:", error);
+        setIsLoading(false);
         alert("An error occurred while updating the class. Please try again.");
         return;
-      } else if (data) {
-        console.log("Class updated successfully:", data);
-        if (onClassAdded) onClassAdded();
       }
 
+      // Update enrollments: delete old, insert new
+      const studentsArray = Array.isArray(formData.students)
+        ? formData.students.map((student) => ({
+            student_id: student.id,
+            [courseIdField]: classData.id,
+          }))
+        : [];
+
+      // Delete old enrollments
+      await supabase
+        .from(enrollmentTable)
+        .delete()
+        .eq(courseIdField, classData.id);
+
+      // Insert new enrollments
+      if (studentsArray.length > 0) {
+        await supabase.from(enrollmentTable).insert(studentsArray);
+      }
+
+      setIsLoading(false);
+      if (onClassAdded) onClassAdded();
       handleClose();
     } catch (error) {
-      console.error("Error updating class:", error.message, error.details, error.hint);
       setIsLoading(false);
       alert("An error occurred while updating the class. Please try again.");
     }
-  }
+  };
 
   return (
     <Dialog open={open} onClose={handleClose} style={{ color: "#09090B" }}>
-      <DialogContent className="sm:max-w-[525px]" sx={{ backgroundColor: "#09090B", color: "#fafafa", borderRadius: '8px', border: '1px solid #ffffff', }}>
-        <h3 style={{ marginBottom: '0px' }}>Edit Class</h3>
-        <DialogContentText className="mt-2" sx={{ color: "#a1a1aa", fontSize: '14px' }}>
+      <DialogContent
+        className="sm:max-w-[525px]"
+        sx={{
+          backgroundColor: "#09090B",
+          color: "#fafafa",
+          borderRadius: "8px",
+          border: "1px solid #ffffff",
+        }}
+      >
+        <h3 style={{ marginBottom: "0px" }}>Edit Class</h3>
+        <DialogContentText
+          className="mt-2"
+          sx={{ color: "#a1a1aa", fontSize: "14px" }}
+        >
           Edit the details for this class. Click save when you're done.
         </DialogContentText>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4 mt-[20px]">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <InputLabel htmlFor="code" sx={{ color: "#fafafa" }}>Class Code</InputLabel>
+                <InputLabel htmlFor="code" sx={{ color: "#fafafa" }}>
+                  Class Code
+                </InputLabel>
                 <TextField
                   id="code"
                   name="code"
@@ -184,33 +238,18 @@ async function fetchLocationName(lat, lon) {
                   value={formData.code}
                   onChange={handleInputChange}
                   required
-                  sx={{color: "#fafafa", backgroundColor: "#18181b", borderRadius: '8px', margin: '5px 0',
-                    "& .MuiInputLabel-root.Mui-focused": { color: "#ffffff" },
-                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                      borderColor: "#ffffff",
-                      },
-                    "& .MuiOutlinedInput-root": {
-                      "& fieldset": { borderColor: "#27272a" },
-                      "&:hover fieldset": { borderColor: "#fafafa" },
-                      "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                    },
-                    "& .MuiInputBase-input": {
-                      color: "#fafafa",
-                      paddingLeft: '10px',
-                      height: '15px'
-                    },
-                    "& input:-webkit-autofill": {
-                      WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                      WebkitTextFillColor: "#fafafa",
-                      transition: "background-color 5000s ease-in-out 0s",
-                    },
-                  }}
-                  inputProps={{ style: { paddingLeft: '10px' } }}
+                  sx={{style}}
+                  inputProps={{ style: { paddingLeft: "10px" } }}
                 />
               </div>
             </div>
             <div className="space-y-2">
-              <InputLabel htmlFor="name" sx={{ color: "#fafafa", marginTop: '10px' }}>Class Name</InputLabel>
+              <InputLabel
+                htmlFor="name"
+                sx={{ color: "#fafafa", marginTop: "10px" }}
+              >
+                Class Name
+              </InputLabel>
               <TextField
                 id="name"
                 name="name"
@@ -218,73 +257,79 @@ async function fetchLocationName(lat, lon) {
                 value={formData.name}
                 onChange={handleInputChange}
                 required
-                style={{ width: '100%' }}
-                sx={{color: "#fafafa", backgroundColor: "#18181b", borderRadius: '8px', margin: '5px 0',
-                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                      borderColor: "#ffffff",
-                      },
-                    "& .MuiOutlinedInput-root": {
-                      "& fieldset": { borderColor: "#27272a" },
-                      "&:hover fieldset": { borderColor: "#fafafa" },
-                      "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                    },
-                    "& .MuiInputBase-input": {
-                      color: "#fafafa",
-                      paddingLeft: '10px',
-                      height: '15px'
-                    },
-                    "& input:-webkit-autofill": {
-                      WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                      WebkitTextFillColor: "#fafafa",
-                      transition: "background-color 5000s ease-in-out 0s",
-                    },
-                  }}
-                inputProps={{ style: { paddingLeft: '10px' } }}
+                style={{ width: "100%" }}
+                sx={{style}}
+                inputProps={{ style: { paddingLeft: "10px" } }}
               />
             </div>
             <div className="space-y-2">
-              <InputLabel htmlFor="lecturer" sx={{ color: "#fafafa", marginTop: '10px' }}>Lecturer</InputLabel>
+              <InputLabel
+                htmlFor="lecturer"
+                sx={{ color: "#fafafa", marginTop: "10px" }}
+              >
+                Lecturer
+              </InputLabel>
               <TextField
+                select
                 id="lecturer"
                 name="lecturer"
-                placeholder="e.g., Dr. John Smith"
+                placeholder="Select Lecturer"
                 value={formData.lecturer}
                 onChange={handleInputChange}
+                margin="normal"
                 required
-                style={{ width: '100%' }}
-                sx={{color: "#fafafa", backgroundColor: "#18181b", borderRadius: '8px', margin: '5px 0',
-                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                      borderColor: "#ffffff",
-                      },
-                    "& .MuiOutlinedInput-root": {
-                      "& fieldset": { borderColor: "#27272a" },
-                      "&:hover fieldset": { borderColor: "#fafafa" },
-                      "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                    },
-                    "& .MuiInputBase-input": {
-                      color: "#fafafa",
-                      paddingLeft: '10px',
-                      height: '15px'
-                    },
-                    "& input:-webkit-autofill": {
-                      WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                      WebkitTextFillColor: "#fafafa",
-                      transition: "background-color 5000s ease-in-out 0s",
-                    },
-                  }}
-                inputProps={{ style: { paddingLeft: '10px' } }}
-              />
+                style={{ width: "100%" }}
+                sx={{style}}
+                inputProps={{ style: { paddingLeft: "10px" } }}
+                SelectProps={{ displayEmpty: true }}
+              >
+                {lecturers.map((lect) => (
+                  <MenuItem key={lect.id} value={lect.id}>
+                    {lect.name}
+                  </MenuItem>
+                ))}
+              </TextField>
             </div>
             <div className="space-y-2">
-              <ScheduleInput 
-                formData={formData} 
+              <InputLabel htmlFor="type" sx={{ color: "#fafafa" }}>
+                Class Type
+              </InputLabel>
+              <TextField
+                id="type"
+                name="type"
+                select
+                value={formData.type}
+                onChange={handleInputChange}
+                required
+                sx={{style}}
+                inputProps={{ style: { paddingLeft: "10px" } }}
+                SelectProps={{ displayEmpty: true }}
+                disabled
+              >
+                <MenuItem value="Lecture">Lecture</MenuItem>
+                <MenuItem value="Tutorial">Tutorial</MenuItem>
+              </TextField>
+            </div>
+            <div className="space-y-2">
+              <ScheduleInput
+                formData={formData}
                 setFormData={setFormData}
               />
             </div>
-            <div className="space-y-2" style={{ marginTop: '20px' }}>
-              <LocationInput
-                formData={formData}
-                setFormData={setFormData}
+            <div className="space-y-2" style={{ marginTop: "20px" }}>
+              <InputLabel htmlFor="location" sx={{ color: "#fafafa" }}>
+                Location
+              </InputLabel>
+              <TextField
+                id="location"
+                name="location"
+                placeholder="e.g., Room 101"
+                value={formData.location}
+                onChange={handleInputChange}
+                required
+                style={{ width: "100%" }}
+                sx={{style}}
+                inputProps={{ style: { paddingLeft: "10px" } }}
               />
             </div>
             <div className="space-y-2">
@@ -295,10 +340,19 @@ async function fetchLocationName(lat, lon) {
             </div>
           </div>
           <DialogActions className="mt-[10px]">
-            <Button type="button" variant="outlined" onClick={handleClose} style={{color: "#fafafa", borderColor: "#27272a"}}>
+            <Button
+              type="button"
+              variant="outlined"
+              onClick={handleClose}
+              style={{ color: "#fafafa", borderColor: "#27272a" }}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading} style={{color: "#09090b", backgroundColor: "#ffffff"}}>
+            <Button
+              type="submit"
+              disabled={isLoading}
+              style={{ color: "#09090b", backgroundColor: "#ffffff" }}
+            >
               {isLoading ? "Saving..." : "Save Changes"}
             </Button>
           </DialogActions>

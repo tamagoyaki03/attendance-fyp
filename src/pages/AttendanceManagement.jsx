@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom";
 import { Card, CardContent, Typography, Chip } from "@mui/material";
+import { v4 as uuidv4 } from "uuid"; 
 import Box from "@mui/material/Box";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
@@ -8,27 +9,32 @@ import Snackbar from "@mui/material/Snackbar";
 import MuiAlert from "@mui/material/Alert";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
-import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DownloadIcon from "@mui/icons-material/Download";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import QrCodeIcon from "@mui/icons-material/QrCode";
 import AutorenewIcon from "@mui/icons-material/Autorenew";
-import SearchIcon from "@mui/icons-material/Search";
 import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
 import PersonRemoveIcon from "@mui/icons-material/PersonRemove";
 import GroupIcon from "@mui/icons-material/Group";
 import ErrorIcon from "@mui/icons-material/Error";
-import CancelIcon from "@mui/icons-material/Cancel";
 import { FaSearch } from "react-icons/fa";
 import AttendanceSession from "../components/Event/AttendanceSession";
-// import { StudentAttendanceList } from "@/components/student-attendance-list"
+import StudentAttendanceList from "../components/StudentAttendanceList";
 import StudentDetailsCard  from "../components/StudentDetailsCard"
 import Sidebar from "../components/Sidebar";
 import InputField from "../components/InputField";
 import supabase from "../config/supabaseClient";
-import  AttendanceStats  from "../components/AttendanceStats"
+import AttendanceStats  from "../components/AttendanceStats"
 import Button from "../components/Button";
-// import { FlaggedAttendanceList } from "@/components/flagged-attendance-list"
+import FlaggedAttendanceList from "../components/FlaggedAttendanceList"
+
+const DAY_NUMBER_TO_NAME = {
+  1: "Monday",
+  2: "Tuesday",
+  3: "Wednesday",
+  4: "Thursday",
+  5: "Friday"
+};
 
 export default function AttendanceManagementPage() {
   const router = useNavigate()
@@ -53,34 +59,51 @@ export default function AttendanceManagementPage() {
   const handleCloseSnackbar = () => setSnackbar({ ...snackbar, open: false });
   const [addresses, setAddresses] = useState({});
   const [now, setNow] = useState(Date.now());
+  const [classAttendance, setClassAttendance] = useState(null);
+  const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
+  const user = JSON.parse(sessionStorage.getItem("user")) || {};
+  const userRole = user.role || "Lecturer";
+  const userName = user.name || "Charlie Tan";
+  const [enrolledStudents, setEnrolledStudents] = useState([]);
+  const [currentSessionPassword, setCurrentSessionPassword] = useState(null);
 
-useEffect(() => {
-  if (!sessionActive) return;
-  const interval = setInterval(() => setNow(Date.now()), 1000);
-  return () => clearInterval(interval);
-}, [sessionActive]);
+  useEffect(() => {
+    if (!sessionActive) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [sessionActive]);
 
+  // Fetch from course_lecture instead of classes
   useEffect(() => {
   const fetchClasses = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase.from('classes').select('*');
+    const { data, error } = await supabase.from('course_lecture').select('*');
     if (error) {
       setFetchError('Could not fetch classes');
       setClasses([]);
     } else {
-      // Calculate duration in minutes for each class
-      const classesWithDuration = (data || []).map(cls => {
-        if (cls.start_time && cls.end_time) {
-          // Parse as "HH:mm" or "HH:mm:ss"
-          const [sh, sm] = cls.start_time.split(':').map(Number);
-          const [eh, em] = cls.end_time.split(':').map(Number);
+      // Filter classes for lecturer: only show classes where lecturer matches userName
+      let filtered = data || [];
+      if (userRole !== "Administrator") {
+        filtered = filtered.filter(cls => cls.lecturer_id === user.id);
+      }
+      // Calculate duration in minutes for each class and convert day_of_week
+      const classesWithDuration = filtered.map(cls => {
+        // Convert day_of_week number to string
+        let dayOfWeekStr = cls.day_of_week;
+        if (typeof dayOfWeekStr === "number" && DAY_NUMBER_TO_NAME[dayOfWeekStr]) {
+          dayOfWeekStr = DAY_NUMBER_TO_NAME[dayOfWeekStr];
+        }
+        if (cls.lecture_start_time && cls.lecture_end_time) {
+          const [sh, sm] = cls.lecture_start_time.split(':').map(Number);
+          const [eh, em] = cls.lecture_end_time.split(':').map(Number);
           const start = sh * 60 + sm;
           const end = eh * 60 + em;
           let duration = end - start;
-          if (duration < 0) duration += 24 * 60; // handle overnight classes
-          return { ...cls, duration };
+          if (duration < 0) duration += 24 * 60;
+          return { ...cls, duration, day_of_week: dayOfWeekStr };
         }
-        return { ...cls, duration: 0 };
+        return { ...cls, duration: 0, day_of_week: dayOfWeekStr };
       });
       setClasses(classesWithDuration);
       setFetchError(null);
@@ -88,13 +111,74 @@ useEffect(() => {
     setIsLoading(false);
   };
   fetchClasses();
-}, []);
+}, [userRole, userName, user.id]);
+
+const [presentCount, setPresentCount] = useState(0);
+const [absentCount, setAbsentCount] = useState(0);
+
+useEffect(() => {
+  if (!currentAttendanceId) return;
+  let intervalId;
+  const fetchCounts = async () => {
+    // Get all enrollments for this class
+    const { data: session, error: sessionError } = await supabase
+      .from("attendance_session")
+      .select("id, course_lecture_id")
+      .eq("id", currentAttendanceId)
+      .single();
+    if (sessionError || !session) return;
+
+    const { data: enrollments } = await supabase
+      .from("enrollment_lecture")
+      .select("id")
+      .eq("course_id", session.course_lecture_id);
+
+    const { data: attendanceRecords } = await supabase
+      .from("attendance_record")
+      .select("lecture_enrollment_id, status")
+      .eq("session_id", session.id);
+
+    // Map enrollment id to attendance status
+    const presentStatuses = "present";
+    let present = 0;
+    let absent = 0;
+    enrollments.forEach((enroll) => {
+      const record = attendanceRecords.find(
+        (rec) => rec.lecture_enrollment_id === enroll.id && presentStatuses.includes(rec.status)
+      );
+      if (record) present += 1;
+      else absent += 1;
+    });
+    setPresentCount(present);
+    setAbsentCount(absent);
+  };
+  fetchCounts();
+  intervalId = setInterval(fetchCounts, 5000); // Poll every 5 seconds
+  return () => clearInterval(intervalId);
+}, [currentAttendanceId]);
+
+useEffect(() => {
+  if (!selectedClass) {
+    setEnrolledStudents([]);
+    return;
+  }
+  let isMounted = true;
+  const fetchEnrolled = async () => {
+    const { data, error } = await supabase
+      .from("enrollment_lecture")
+      .select("student_id")
+      .eq("course_id", selectedClass.id);
+    if (isMounted) setEnrolledStudents(data ? data.map(e => e.student_id) : []);
+  };
+  fetchEnrolled();
+  return () => { isMounted = false; };
+}, [selectedClass]);
 
   useEffect(() => {
     // Fetch addresses for classes with lat/long but no location string
     classes.forEach(async (cls) => {
       if (
-        (!cls.location || cls.location.trim() === "") &&
+        (!cls.lecture_location || cls.lecture_location.trim() === "") &&
         cls.lat && cls.long &&
         !addresses[cls.id]
       ) {
@@ -105,13 +189,13 @@ useEffect(() => {
   }, [classes, addresses]);
 
   useEffect(() => {
-  if (classId && classes.length > 0) {
-    const found = classes.find((cls) => String(cls.id) === String(classId));
-    setSelectedClass(found || null);
-  } else {
-    setSelectedClass(null); // <-- Add this line
-  }
-}, [classId, classes]);
+    if (classId && classes.length > 0) {
+      const found = classes.find((cls) => String(cls.id) === String(classId));
+      setSelectedClass(found || null);
+    } else {
+      setSelectedClass(null);
+    }
+  }, [classId, classes]);
 
   const getCurrentLocation = () => {
     return new Promise((resolve, reject) => {
@@ -128,41 +212,151 @@ useEffect(() => {
   }
 
   function formatDuration(start) {
-  if (!start) return "0:00";
-  const diff = Math.floor((now - start.getTime()) / 1000);
-  const mins = Math.floor(diff / 60);
-  const secs = diff % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
+    if (!start) return "0:00";
+    const diff = Math.floor((now - start.getTime()) / 1000);
+    const mins = Math.floor(diff / 60);
+    const secs = diff % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
+
+  function ClassCardWithEnrollmentCount({ cls, addresses, onClick }) {
+  const [totalStudents, setTotalStudents] = React.useState(null);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    const fetchEnrollment = async () => {
+      const { data, error } = await supabase
+        .from("enrollment_lecture")
+        .select("id")
+        .eq("course_id", cls.id);
+      if (isMounted) setTotalStudents(data ? data.length : 0);
+    };
+    fetchEnrollment();
+    return () => { isMounted = false; };
+  }, [cls.id]);
+
+  return (
+    <Card
+      className="cursor-pointer hover:bg-muted/50 border mt-[20px]"
+      style={{ background: "#09090b" }}
+      onClick={onClick}
+    >
+      <div className="p-4 m-[15px]">
+        <h4 className="mb-[0px] text-[18px]">
+          {cls.course_code}: {cls.course_title}
+        </h4>
+        <Typography color="text.secondary">
+          {cls.day_of_week && cls.lecture_start_time && cls.lecture_end_time
+            ? `${cls.day_of_week}, ${cls.lecture_start_time.slice(0, 5)} - ${cls.lecture_end_time.slice(0, 5)}`
+            : "No schedule info"}
+        </Typography>
+      </div>
+      <CardContent style={{ paddingTop: "5px" }}>
+        <div className="flex items-center text-sm" style={{ color: "#a1a1aa" }}>
+          <LocationOnIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
+          {cls.lecture_location && cls.lecture_location.trim() !== ""
+            ? cls.lecture_location
+            : (cls.lat && cls.long
+              ? (addresses[cls.id] || `Lat: ${Number(cls.lat).toFixed(5)}, Long: ${Number(cls.long).toFixed(5)}`)
+              : "No location info")}
+        </div>
+        <div className="flex items-center text-sm mt-2" style={{ color: "#a1a1aa" }}>
+          <GroupIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
+          {totalStudents === null ? "Loading students..." : `${totalStudents} enrolled students`}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
+  // 1. Start session: insert new row and store its id (attendance_session table)
   const handleStartSession = async () => {
     setIsLoading(true)
+    setSessionActive(true);
+    setSessionStartTime(new Date());
+    localStorage.setItem("attendanceSession", JSON.stringify({
+      sessionActive: true,
+      sessionStartTime: new Date().toISOString(),
+      selectedClassId: selectedClass.id
+    }));
     try {
       const position = await getCurrentLocation()
-    const location = {
-      lat: position.coords.latitude,
-      lng: position.coords.longitude,
+      const location = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      }
+      setCurrentLocation(location)
+      setSessionType("start")
+      setQrDialogOpen(true)
+      setSnackbar({
+        open: true,
+        message: `Attendance session started.`,
+        severity: "success",
+      })
+      // Generate the special password
+      const specialPassword = uuidv4();
+
+      // Create new attendance session row
+      const { data, error } = await supabase
+        .from('attendance_session')
+        .insert([{
+          course_lecture_id: selectedClass.id,
+          latitude: location.lat,
+          longitude: location.lng,
+          attendance_password: specialPassword
+          // add other fields if needed
+        }])
+        .select()
+        .single();
+      if (error) throw error;
+      setCurrentAttendanceId(data.id); // store the new session's id
+      setClassAttendance(data);
+      setCurrentSessionPassword(specialPassword);
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: "Failed to start session.",
+        severity: "error",
+      })
+    } finally {
+      setIsLoading(false)
     }
-    setCurrentLocation(location)
-    setSessionStartTime(new Date())
-    setSessionActive(true)
-    setSessionType("start")
-    setQrDialogOpen(true)
-    setSnackbar({
-      open: true,
-      message: `Attendance session started.`,
-      severity: "success",
-    })
-  } catch (error) {
-    setSnackbar({
-      open: true,
-      message: "Failed to start session.",
-      severity: "error",
-    })
-  } finally {
-    setIsLoading(false)
   }
-  }
+
+  // 2. Fetch attendance data by session id (attendance_session table)
+  useEffect(() => {
+    if (!currentAttendanceId) return;
+    const fetchClassAttendance = async () => {
+      const { data, error } = await supabase
+        .from("attendance_session")
+        .select("*")
+        .eq("id", currentAttendanceId)
+        .single();
+      if (!error) setClassAttendance(data);
+      else setClassAttendance(null);
+    };
+    fetchClassAttendance();
+    // Optionally poll for updates
+    const interval = setInterval(fetchClassAttendance, 5000);
+    return () => clearInterval(interval);
+  }, [currentAttendanceId]);
+
+  // Optionally, poll for updates to the session's students list
+  // useEffect(() => {
+  //   if (!selectedClass) return;
+  //   const interval = setInterval(() => {
+  //     if (!currentAttendanceId) return;
+  //     supabase
+  //       .from("attendance_session")
+  //       .select("students")
+  //       .eq("id", currentAttendanceId)
+  //       .single()
+  //       .then(({ data, error }) => {
+  //         if (!error) setClassAttendance(data);
+  //       });
+  //   }, 5000);
+  //   return () => clearInterval(interval);
+  // }, [selectedClass, currentAttendanceId]);
 
   const handleEndSession = async () => {
     setIsLoading(true)
@@ -195,6 +389,7 @@ useEffect(() => {
   const handleFinalizeSession = () => {
     setSessionActive(false)
     setQrDialogOpen(false)
+    localStorage.removeItem("attendanceSession");
     setSnackbar({
       open: true,
       message: "Attendance session finalized. All attendance records have been saved to the database.",
@@ -207,13 +402,13 @@ useEffect(() => {
   };
 
   const handleSessionExpire = () => {
-   setQrDialogOpen(false);
-   setSnackbar({
-    open: true,
-    message: "QR code expired. Please generate a new QR or finalize the session.",
-    severity: "info",
-  });
-};
+    setQrDialogOpen(false);
+    setSnackbar({
+      open: true,
+      message: "QR code expired. Please generate a new QR or finalize the session.",
+      severity: "info",
+    });
+  };
 
   const handleSelectStudent = (student) => setSelectedStudent(student)
   const handleCloseStudentDetails = () => setSelectedStudent(null)
@@ -242,18 +437,18 @@ useEffect(() => {
   }
 
   async function getAddressFromLatLng(lat, lng) {
-  const response = await fetch(
-    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
-  );
-  const data = await response.json();
-  return data.display_name || `${lat}, ${lng}`;
-}
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
+    );
+    const data = await response.json();
+    return data.display_name || `${lat}, ${lng}`;
+  }
 
-const filteredClasses = classes.filter(
-  (cls) =>
-    cls.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cls.code?.toLowerCase().includes(searchTerm.toLowerCase())
-);
+  const filteredClasses = classes.filter(
+    (cls) =>
+      cls.course_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      cls.course_code?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   useEffect(() => {
     if (sessionActive && sessionStartTime && selectedClass) {
@@ -304,7 +499,6 @@ const filteredClasses = classes.filter(
             <div className="flex items-center justify-between">
                 <h2 className="text-3xl font-bold tracking-tight">Attendance Management</h2>
             </div>
-        
             <div>
                 <Card className="border color-[#e5e7eb] w-full" style={{ background: "#09090b"}}>
                 <div className="pb-2 m-[20px] mb-[0px]">
@@ -325,50 +519,23 @@ const filteredClasses = classes.filter(
                         />
                     </div>
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                        {filteredClasses.map((cls) => (
-                            <Card 
-                                key={cls.id}
-                                className="cursor-pointer hover:bg-muted/50 border mt-[20px]" 
-                                style={{ background: "#09090b" }}
-                                onClick={() => router(`/attendance-management?classId=${cls.id}`)}
-                                >
-                                <div className="p-4 m-[15px]">
-                                    <h4 className="mb-[0px] text-[18px]">
-                                    {cls.code}: {cls.name}
-                                    </h4>
-                                    {/* Display class schedule */}
-                                    <Typography color="text.secondary">
-                                    {cls.day && cls.start_time && cls.end_time
-                                        ? `${cls.day}, ${cls.start_time.slice(0,5)} - ${cls.end_time.slice(0,5)}`
-                                        : "No schedule info"}
-                                    </Typography>
-                                </div>
-                                <CardContent style={{ paddingTop: "5px" }}>
-                                    {/* Display class location */}
-                                    <div className="flex items-center text-sm" style={{ color: "#a1a1aa" }}>
-                                        <LocationOnIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
-                                        {cls.location && cls.location.trim() !== ""
-                                        ? cls.location
-                                        : (cls.lat && cls.long
-                                            ? (addresses[cls.id] || `Lat: ${Number(cls.lat).toFixed(5)}, Long: ${Number(cls.long).toFixed(5)}`)
-                                            : "No location info")}
-                                    </div>
-                                    <div className="flex items-center text-sm mt-1" style={{ color: "#a1a1aa" }}>
-                                    <GroupIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
-                                    {(Array.isArray(cls.students) ? cls.students.length : 0)} students
-                                    </div>
-                                </CardContent>
-                            </Card>
-                            ))}
-                        </div>
-                    </div>
-                </CardContent>
-                </Card>
-            </div>
+                  {filteredClasses.map((cls) => (
+                    <ClassCardWithEnrollmentCount
+                      key={cls.id}
+                      cls={cls}
+                      addresses={addresses}
+                      onClick={() => router(`/attendance-management?classId=${cls.id}`)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
+      </div>
     </div>
-    )
-  }
+  );
+}
 
   return (
     <div className="grid grid-cols-[250px_1fr] gap-[40px] h-screen w-screen">
@@ -379,16 +546,16 @@ const filteredClasses = classes.filter(
         <div className="flex flex-row items-start justify-between flex-wrap gap-4 mb-4">
             <div>
             <h2 className="text-3xl font-bold tracking-tight mb-[0px]">
-                {selectedClass.code}: {selectedClass.name}
+                {selectedClass.course_code}: {selectedClass.course_title}
             </h2>
             <p className="text-muted-foreground m-[0px]" style={{ color: "#a1a1aa" }}>
-                {selectedClass.day && selectedClass.start_time && selectedClass.end_time
-                ? `${selectedClass.day}, ${selectedClass.start_time.slice(0,5)} - ${selectedClass.end_time.slice(0,5)}`
+                {selectedClass.day_of_week && selectedClass.lecture_start_time && selectedClass.lecture_end_time
+                ? `${selectedClass.day_of_week}, ${selectedClass.lecture_start_time.slice(0,5)} - ${selectedClass.lecture_end_time.slice(0,5)}`
                 : "No schedule info"}
             </p>
             <p className="text-muted-foreground mt-[0px]" style={{ color: "#a1a1aa" }}>
-                {selectedClass.location && selectedClass.location.trim() !== ""
-                ? selectedClass.location
+                {selectedClass.lecture_location && selectedClass.lecture_location.trim() !== ""
+                ? selectedClass.lecture_location
                 : (selectedClass.lat && selectedClass.long
                     ? (addresses[selectedClass.id] || `Lat: ${Number(selectedClass.lat).toFixed(5)}, Long: ${Number(selectedClass.long).toFixed(5)}`)
                     : "No location info")}
@@ -426,7 +593,7 @@ const filteredClasses = classes.filter(
             </div>
         </div>
 
-      {sessionActive && (
+      {sessionActive && classAttendance && (
         <Card
             sx={{
             border: '1px solid',
@@ -435,15 +602,9 @@ const filteredClasses = classes.filter(
             backgroundColor: '#09090b',
             }}
         >
-            <Box
-            sx={{
-                backgroundColor: 'rgba(232, 245, 233, 0.1)' ,
-                // dark: { backgroundColor: '#1b5e20', opacity: 0.1 },
-                p: 2,
-            }}
-            >
+            <Box sx={{backgroundColor: 'rgba(232, 245, 233, 0.1)' ,p: 2,}}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                <Typography sx={{ color: '#388e3c', dark: { color: '#66bb6a' }, fontWeight: 'bold', fontSize: '1.25rem' }}>
+                <Typography sx={{ color: '#388e3c', fontWeight: 'bold', fontSize: '1.25rem' }}>
                 Active Attendance Session
                 </Typography>
                 <Chip sx={{ backgroundColor: '#4caf50', color: '#09090b' }} label="Live"/>
@@ -494,19 +655,13 @@ const filteredClasses = classes.filter(
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     <PersonAddAlt1Icon sx={{ fontSize: 20, color: '#4caf50' }} />
                     <Typography sx={{ fontSize: '0.875rem' }}>
-                    Present: {selectedClass.presentCount} students
+                    Present: {presentCount} students
                     </Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <PersonRemoveIcon sx={{ fontSize: 20, color: 'red' }} />
+                    <PersonRemoveIcon sx={{ fontSize: 20, color: '#ff0000' }} />
                     <Typography sx={{ fontSize: '0.875rem' }}>
-                    Absent: {selectedClass.absentCount} students
-                    </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <ErrorIcon sx={{ fontSize: 20, color: '#ffbf00' }} />
-                    <Typography sx={{ fontSize: '0.875rem' }}>
-                    Flagged: {selectedClass.flaggedCount} check-ins
+                    Absent: {absentCount} students
                     </Typography>
                 </Box>
                 </Box>
@@ -515,9 +670,13 @@ const filteredClasses = classes.filter(
         </Card>
       )}
 
-
       <div className="grid gap-4 md:grid-cols-3 w-full mt-[20px]">
-        <AttendanceStats classData={selectedClass} />
+        <AttendanceStats
+          classData={{ ...selectedClass, students: enrolledStudents }}
+          classAttendance={classAttendance}
+          presentCount={presentCount}
+          absentCount={absentCount}
+        />
       </div>
 
       <Card className="border mt-[20px] mb-[20px]" style={{ background: "#09090b" }}>
@@ -526,25 +685,29 @@ const filteredClasses = classes.filter(
             <Typography variant="body2" color="text.secondary">View and manage student attendance for this class</Typography>
         </div>
         <CardContent>
-          <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
-            <Tab label={`Present (${selectedClass.presentCount})`} value="present" />
-            <Tab label={`Absent (${selectedClass.absentCount})`} value="absent" />
-            <Tab label={`Flagged (${selectedClass.flaggedCount})`} value="flagged" />
-          </Tabs>
-          {/* {activeTab === "present" && (
-            <StudentAttendanceList status="present" onSelectStudent={handleSelectStudent} />
+          {!selectedStudent && (
+            <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
+              <Tab label={`Present (${presentCount})`} value="present"/>
+              <Tab label={`Absent (${absentCount})`} value="absent"/>
+              <Tab label={`Excused (${Array.isArray(classAttendance?.students) ? classAttendance.students.length : 0})`} value="excused"/>
+              <Tab label={`Flagged (${Array.isArray(classAttendance?.students) ? classAttendance.students.length : 0})`} value="flagged"/>
+            </Tabs>
           )}
-          {activeTab === "absent" && (
-            <StudentAttendanceList status="absent" onSelectStudent={handleSelectStudent} />
+          {!selectedStudent ? (
+            <>
+              <StudentAttendanceList
+                statusFilter={activeTab}
+                onSelectStudent={handleSelectStudent}
+                classAttendanceId={currentAttendanceId}
+              />
+            </>
+          ) : (
+            <StudentDetailsCard
+              student={selectedStudent}
+              onClose={handleCloseStudentDetails}
+              onMarkPresent={handleMarkPresent}
+            />
           )}
-          {activeTab === "flagged" && (
-            <FlaggedAttendanceList onSelectStudent={handleSelectStudent} />
-          )} */}
-          <StudentDetailsCard
-            student={selectedStudent}
-            onClose={handleCloseStudentDetails}
-            onMarkPresent={handleMarkPresent}
-          />
         </CardContent>
       </Card>
 
@@ -556,6 +719,7 @@ const filteredClasses = classes.filter(
         location={currentLocation}
         onFinalize={handleFinalizeSession}
         onExpire={handleSessionExpire}
+        sessionPassword={currentSessionPassword} 
       />
       <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar}>
         <MuiAlert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>

@@ -89,7 +89,7 @@ function ScheduleInput({ formData, setFormData }) {
       return;
     }
 
-    const scheduleText = `${formData.day.join(", ")} ${formData.startTime} - ${formData.endTime} from ${dayjs(formData.startDate).format("DD/MM/YYYY")} to ${dayjs(formData.endDate).format("DD/MM/YYYY")}`;
+    const scheduleText = `${formData.day} ${formData.startTime} - ${formData.endTime} from ${dayjs(formData.startDate).format("DD/MM/YYYY")} to ${dayjs(formData.endDate).format("DD/MM/YYYY")}`;
 
     setFormData({
       ...formData,

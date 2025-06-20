@@ -1,15 +1,18 @@
 import React from 'react';
-import { useState } from 'react'
+import { BrowserRouter as Router } from 'react-router-dom';
 import Routes from './Routes';
+import { AuthProvider } from "./SupabaseProvider";
 
 function App() {
-  {/*const [count, setCount] = useState(0)*/}
   return (
     <div className="App">
-      <Routes />
-      {/* <MainContent count={count} setCount={setCount} /> */}
+      {/* <AuthProvider> */}
+        <Router>
+          <Routes />
+        </Router>
+      {/* </AuthProvider> */}
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

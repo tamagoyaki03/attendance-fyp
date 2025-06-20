@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Table,
   TableBody,
@@ -8,135 +8,95 @@ import {
   Button,
 } from "@mui/material";
 import Chip from "@mui/material/Chip";
+import supabase from "../config/supabaseClient";
 
-  const fraudData = [
-    {
-      id: 1,
-      student: "John Smith",
-      studentId: "S12345",
-      course: "CS101",
-      date: "Apr 11, 2023",
-      time: "10:15 AM",
-      type: "Location Mismatch",
-      details: "Student location is 2.5km away from lecture hall",
-      status: "Open",
-  },
-  {
-    id: 2,
-    student: "Emma Johnson",
-    studentId: "S12346",
-    course: "BIO202",
-    date: "Apr 11, 2023",
-    time: "11:30 AM",
-    type: "Suspicious Pattern",
-    details: "Absent for 3 weeks, now present for all classes",
-    status: "Open",
-  },
-  {
-    id: 3,
-    student: "Michael Brown",
-    studentId: "S12347",
-    course: "MATH303",
-    date: "Apr 11, 2023",
-    time: "2:45 PM",
-    type: "Early Clock-out",
-    details: "Clocked out 30 minutes before class end",
-    status: "Open",
-  },
-  {
-    id: 4,
-    student: "Sarah Davis",
-    studentId: "S12348",
-    course: "ENG101",
-    date: "Apr 11, 2023",
-    time: "9:05 AM",
-    type: "Location Mismatch",
-    details: "Student location is 1.8km away from lecture hall",
-    status: "Open",
-  },
-  {
-    id: 5,
-    student: "David Wilson",
-    studentId: "S12349",
-    course: "PHYS201",
-    date: "Apr 11, 2023",
-    time: "3:10 PM",
-    type: "Multiple Check-ins",
-    details: "Multiple devices used for check-in",
-    status: "Open"
-  },
-  {
-    id: 6,
-    student: "Jennifer Lee",
-    studentId: "S12350",
-    course: "CHEM101",
-    date: "Apr 10, 2023",
-    time: "11:20 AM",
-    type: "Location Mismatch",
-    details: "Student location is 3.1km away from lecture hall",
-    status: "Resolved"
-  },
-  {
-    id: 7,
-    student: "Robert Taylor",
-    studentId: "S12351",
-    course: "HIST202",
-    date: "Apr 10, 2023",
-    time: "1:45 PM",
-    type: "Suspicious Pattern",
-    details: "Inconsistent attendance pattern detected",
-    status: "Resolved"
-  },
-  {
-    id: 8,
-    student: "Lisa Anderson",
-    studentId: "S12352",
-    course: "ART101",
-    date: "Apr 10, 2023",
-    time: "9:30 AM",
-    type: "Early Clock-out",
-    details: "Clocked out 25 minutes before class end",
-    status: "Resolved"
-  },
-]
-
-export default function FraudTable() {
-  const [alerts, setAlerts] = useState(fraudData);
+export default function FraudTable( {searchTerm }) {
+  const [alerts, setAlerts] = useState([]);
   const [snackbar, setSnackbar] = useState({ open: false, message: ""});
+  const [usersMap, setUsersMap] = useState({});
 
-  const handleResolve = (id) => {
-    setAlerts(alerts.map((alert) => (alert.id === id ? { ...alert, status: "Resolved" } : alert)))
-    setSnackbar({
-        title: "Alert resolved",
-        description: "The fraud alert has been marked as resolved.",
-    })
-}
+  useEffect(() => {
+  const fetchData = async () => {
+    // 1. Fetch attendance issues
+    const { data: issues, error: issuesError } = await supabase
+      .from("attendance_issues")
+      .select("*");
 
-    const handleInvestigate = (id) => {
-        setSnackbar({
-            title: "Investigation initiated",
-            description: "An investigation has been started for this alert.",
-        })
+    if (issuesError) {
+      console.error("Error fetching attendance issues:", issuesError.message);
+      return;
     }
 
+    setAlerts(issues || []);
+
+    // 2. Get unique user_ids
+    const userIds = [...new Set((issues || []).map((i) => i.user_id))];
+
+    // 3. Fetch from auth.users
+    const { data: users, error: usersError } = await supabase
+      .from("users") // this works because RLS is OFF on auth.users
+      .select("id, name") // you can also try `full_name` if you have it
+      .in("id", userIds);
+
+    if (usersError) {
+      console.error("Error fetching users:", usersError.message);
+      return;
+    }
+
+    // 4. Build a map of user_id -> user
+    const userMap = {};
+    (users || []).forEach((u) => {
+      userMap[u.id] = u;
+    });
+
+    setUsersMap(userMap);
+  };
+
+  fetchData();
+}, []);
+
+const term = searchTerm.toLowerCase();
+  const filteredData = alerts.filter((row) =>
+    term
+      ? (row.issue_type ?? "").toLowerCase().includes(term) ||
+        (row.description ?? "").toLowerCase().includes(term)
+      : true
+  );
+
+  const handleResolve = async (id) => {
+    // Update status in DB
+    await supabase
+      .from("attendance_issues")
+      .update({ status: "Resolved" })
+      .eq("id", id);
+
+    setAlerts(alerts.map((alert) => (alert.id === id ? { ...alert, status: "Resolved" } : alert)));
+    setSnackbar({
+      title: "Alert resolved",
+      description: "The fraud alert has been marked as resolved.",
+    });
+  };
+
   const getStatusBadge = (status) => {
-  switch (status) {
-    case "Open":
+    switch (status) {
+      case "pending":
       return (
-        <Chip variant="outline" className="border-red-500 text-red-500">
-          Open
-        </Chip>
+        <Chip variant="outlined" sx={{borderColor: "#ffeb3b", color:"#ffeb3b"}} label="Pending" />
       )
-    case "Resolved":
-      return (
-        <Chip variant="outline" className="border-green-500 text-green-500">
-          Resolved
-        </Chip>
-      )
-    default:
-      return <Badge variant="outline">Unknown</Badge>
+      case "open":
+        return (
+          <Chip variant="outline" className="border-red-500 text-red-500">
+            Open
+          </Chip>
+        )
+      case "resolved":
+        return (
+          <Chip variant="outline" sx={{color:"#008000", backgroundColor: "transparent"}} label="Resolved" />
+        )
+      default:
+        return <Chip variant="outline">Unknown</Chip>
+    }
   }
-}
 
   return (
     <div className="rounded-md border">
@@ -153,32 +113,23 @@ export default function FraudTable() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {alerts.map((alert) => (
-            <TableRow key={alert.id}>
+          {filteredData.map((alerts) => (
+            <TableRow key={alerts.id}>
               <TableCell>
-                <div className="font-medium">{alert.student}</div>
-                <div className="text-xs text-muted-foreground">{alert.studentId}</div>
+                <div className="font-medium">{usersMap[alerts.user_id]?.name || "Unknown"}</div>
               </TableCell>
-              <TableCell>{alert.course}</TableCell>
+              <TableCell>{alerts.session_id}</TableCell>
               <TableCell>
-                <div>{alert.date}</div>
-                <div className="text-xs text-muted-foreground">{alert.time}</div>
+                <div>{alerts.created_at?.split("T")[0]}</div>
+                <div className="text-xs text-muted-foreground">{alerts.created_at?.split("T")[1]?.slice(0, 8)}</div>
               </TableCell>
-              <TableCell>{alert.type}</TableCell>
-              <TableCell className="max-w-[200px] truncate">{alert.details}</TableCell>
-              <TableCell>{getStatusBadge(alert.status)}</TableCell>
+              <TableCell>{alerts.issue_type}</TableCell>
+              <TableCell className="max-w-[200px] truncate">{alerts.description}</TableCell>
+              <TableCell>{getStatusBadge(alerts.status)}</TableCell>
               <TableCell>
                 <div className="flex space-x-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleInvestigate(alert.id)}
-                    disabled={alert.status === "Resolved"}
-                  >
-                    Investigate
-                  </Button>
-                  {alert.status === "Open" && (
-                    <Button size="sm" variant="outline" onClick={() => handleResolve(alert.id)}>
+                  {["open", "pending"].includes(alerts.status) && (
+                    <Button size="small" variant="outlined" onClick={() => handleResolve(alert.id)}>
                       Resolve
                     </Button>
                   )}

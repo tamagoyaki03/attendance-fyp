@@ -4,10 +4,14 @@ import GroupIcon from "@mui/icons-material/Group";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 
-export default function AttendanceStats({ classData }) {
+export default function AttendanceStats({ classData, presentCount = 0, absentCount = 0 }) {
+  const total = Array.isArray(classData?.students) ? classData.students.length : 0;
+  const attendanceRate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+  const absenceRate = total > 0 ? Math.round((absentCount / total) * 100) : 0;
+
   return (
     <div className="flex gap-4 w-full">
-      <Card className="flex-1 border " style={{background: "#09090b"}}>
+      <Card className="flex-1 border" style={{ background: "#09090b" }}>
         <CardHeader
           title={
             <Typography fontSize={16} color="white">
@@ -18,14 +22,14 @@ export default function AttendanceStats({ classData }) {
           sx={{ pb: 1 }}
         />
         <CardContent>
-          <Typography variant="h5" fontWeight="bold">{classData.students.length}</Typography>
+          <Typography variant="h5" fontWeight="bold">{total}</Typography>
           <Typography variant="caption" color="text.secondary">
             Enrolled in this class
           </Typography>
         </CardContent>
       </Card>
 
-      <Card className="flex-1 border ml-[20px]" style={{background: "#09090b"}}>
+      <Card className="flex-1 border ml-[20px]" style={{ background: "#09090b" }}>
         <CardHeader
           title={
             <Typography fontSize={16} color="white">
@@ -36,17 +40,16 @@ export default function AttendanceStats({ classData }) {
           sx={{ pb: 1 }}
         />
         <CardContent>
-          <Typography variant="h5">{classData.presentCount}</Typography>
+          <Typography variant="h5" fontWeight="bold">
+            {presentCount}
+          </Typography>
           <Typography variant="caption" color="text.secondary">
-            {classData.totalStudents
-              ? Math.round((classData.presentCount / classData.totalStudents) * 100)
-              : 0}
-            % attendance rate
+            {attendanceRate}% attendance rate
           </Typography>
         </CardContent>
       </Card>
 
-      <Card className="flex-1 border ml-[20px]" style={{background: "#09090b"}}>
+      <Card className="flex-1 border ml-[20px]" style={{ background: "#09090b" }}>
         <CardHeader
           title={
             <Typography fontSize={16} color="white">
@@ -57,12 +60,11 @@ export default function AttendanceStats({ classData }) {
           sx={{ pb: 1 }}
         />
         <CardContent>
-          <Typography variant="h5">{classData.absentCount}</Typography>
+          <Typography variant="h5" fontWeight="bold">
+            {absentCount}
+          </Typography>
           <Typography variant="caption" color="text.secondary">
-            {classData.totalStudents
-              ? Math.round((classData.absentCount / classData.totalStudents) * 100)
-              : 0}
-            % absence rate
+            {absenceRate}% absence rate
           </Typography>
         </CardContent>
       </Card>
