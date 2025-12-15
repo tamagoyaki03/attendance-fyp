@@ -2,16 +2,18 @@ import React, { useState, useEffect } from "react";
 import supabase from "../../config/supabaseClient";
 import {
   Dialog,
+  DialogTitle,
   DialogContent,
   DialogActions,
   DialogContentText,
   Button,
   InputLabel,
+  TextField,
+  MenuItem,
+  Box,
 } from "@mui/material";
 import ScheduleInput from "../ScheduleInput";
-import TextField from "@mui/material/TextField";
 import StudentSearch from "./StudentSearch";
-import MenuItem from "@mui/material/MenuItem";
 
 const DAY_TO_NUMBER = {
   Monday: 1,
@@ -21,40 +23,47 @@ const DAY_TO_NUMBER = {
   Friday: 5,
 };
 
-
-const AddClassDialog = ({ open, onOpenChange, onClassAdded }) => {
-  const [isLoading, setIsLoading] = useState(false)
+export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     code: "",
     name: "",
     lecturer: "",
-    day: [],
+    day: "",
     start_time: "",
     end_time: "",
-    start_date: "",
-    end_date: "",
+    start_date: null,
+    end_date: null,
     students: [],
     location: "",
     type: "",
+    parentCourseId: "", // link tutorial to a lecture
   });
   const [lecturers, setLecturers] = useState([]);
+  const [courses, setCourses] = useState([]);
 
-useEffect(() => {
-  const fetchLecturers = async () => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, name')
-      .eq('role', 'lecturer');
-
-    if (error) {
-      console.error('Error fetching lecturers:', error);
-    } else {
+  useEffect(() => {
+    const fetchLecturers = async () => {
+      const { data } = await supabase.from("users").select("id, name").eq("role", "lecturer");
       setLecturers(data || []);
-    }
-  };
+    };
+    const fetchCourses = async () => {
+      const { data } = await supabase.from("course_lecture").select("id, course_code, course_title");
+      setCourses(data || []);
+    };
+    fetchLecturers();
+    fetchCourses();
+  }, []);
 
-  fetchLecturers();
-}, []);
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      backgroundColor: "#ffffff",
+      color: "#0f172a",
+      "& fieldset": { borderColor: "#e2e8f0" },
+      "&:hover fieldset": { borderColor: "#cbd5e1" },
+      "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+    },
+  };
 
   const handleClose = () => {
     document.activeElement && document.activeElement.blur();
@@ -63,330 +72,186 @@ useEffect(() => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleParentCourseChange = (e) => {
+    const parentCourseId = e.target.value;
+    const selectedCourse = courses.find((c) => c.id === parentCourseId);
+
+    if (selectedCourse) {
+      // Auto-fill code and name from parent course
+      setFormData((prev) => ({
+        ...prev,
+        parentCourseId,
+        code: selectedCourse.course_code,
+        name: selectedCourse.course_title,
+      }));
+    } else {
+      setFormData((prev) => ({ ...prev, parentCourseId }));
+    }
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  setIsLoading(true);
+    e.preventDefault();
+    setIsLoading(true);
 
-  try {
-    const dayNumber = DAY_TO_NUMBER[formData.day]; // formData.day should be e.g. 'Monday'
+    try {
+      const dayNumber = DAY_TO_NUMBER[formData.day];
 
+      let payload;
+      let courseTable, enrollmentTable;
 
-    // 2️⃣ Build the payload for course table (without students)
-    const payload = {
-      course_code: formData.code,
-      course_title: formData.name,
-      lecturer_id: formData.lecturer,
-      day_of_week: dayNumber,
-      lecture_start_time: formData.startTime,
-      lecture_end_time: formData.endTime,
-      lecture_start_date: formData.startDate,
-      lecture_end_date: formData.endDate,
-      lecture_location: formData.location
-    };
-
-    // 3️⃣ Choose table name by type
-    const courseTable =
-      formData.type === "Lecture" ? "course_lecture" : "course_tutorial";
-    const enrollmentTable =
-      formData.type === "Lecture" ? "enrollment_lecture" : "enrollment_tutorial";
-
-    // 4️⃣ Insert course record
-    const { data: courseData, error: courseError } = await supabase
-      .from(courseTable)
-      .insert([payload])
-      .select(); // get the new row(s) back
-
-    if (courseError) {
-      console.error("Error adding course:", courseError);
-      throw courseError;
-    }
-
-    // 5️⃣ Get the inserted course id
-    const courseId = courseData[0].id;
-
-    // 6️⃣ Insert enrollments for each student
-    const studentsArray = Array.isArray(formData.students)
-      ? formData.students.map((student) => ({
-          student_id: student.id,
-          [`course_id`]: courseId, // dynamically set FK
-        }))
-      : [];
-
-    if (studentsArray.length > 0) {
-      const { error: enrollmentError } = await supabase
-        .from(enrollmentTable)
-        .insert(studentsArray);
-
-      if (enrollmentError) {
-        console.error("Error adding enrollments:", enrollmentError);
-        throw enrollmentError;
+      if (formData.type === "Lecture") {
+        courseTable = "course_lecture";
+        enrollmentTable = "enrollment_lecture";
+        payload = {
+          course_code: formData.code,
+          course_title: formData.name,
+          lecturer_id: formData.lecturer,
+          day_of_week: dayNumber,
+          lecture_start_time: formData.start_time || null,
+          lecture_end_time: formData.end_time || null,
+          lecture_start_date: formData.start_date || null,
+          lecture_end_date: formData.end_date || null,
+          lecture_location: formData.location,
+        };
+      } else {
+        courseTable = "course_tutorial";
+        enrollmentTable = "enrollment_tutorial";
+        if (!formData.parentCourseId) {
+          alert("Please select a parent lecture course for this tutorial");
+          setIsLoading(false);
+          return;
+        }
+        payload = {
+          course_id: formData.parentCourseId,
+          course_code: formData.code,
+          course_title: formData.name,
+          lecturer_id: formData.lecturer,
+          day_of_week: dayNumber,
+          tutorial_start_time: formData.start_time || null,
+          tutorial_end_time: formData.end_time || null,
+          tutorial_start_date: formData.start_date || null,
+          tutorial_end_date: formData.end_date || null,
+          tutorial_location: formData.location,
+        };
       }
+
+      const { data: courseData, error: courseError } = await supabase.from(courseTable).insert([payload]).select();
+
+      if (courseError) throw courseError;
+
+      const courseId = courseData[0].id;
+
+      const studentsArray = Array.isArray(formData.students)
+        ? formData.students.map((student) => ({ 
+            student_id: student.id, 
+            [formData.type === "Lecture" ? "course_id" : "tutorial_id"]: courseId 
+          }))
+        : [];
+
+      if (studentsArray.length > 0) {
+        const { error: enrollmentError } = await supabase.from(enrollmentTable).insert(studentsArray);
+        if (enrollmentError) throw enrollmentError;
+      }
+
+      if (onClassAdded) onClassAdded();
+      handleClose();
+      setFormData({
+        code: "",
+        name: "",
+        lecturer: "",
+        day: "",
+        start_time: "",
+        end_time: "",
+        start_date: null,
+        end_date: null,
+        students: [],
+        location: "",
+        type: "",
+      });
+    } catch (error) {
+      console.error("Error adding class:", error);
+      alert("An error occurred while adding the class. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
-
-    // ✅ Done — show success
-    if (onClassAdded) onClassAdded();
-    handleClose();
-    setFormData({
-      code: "",
-      name: "",
-      lecturer: "",
-      day: "",
-      start_time: "",
-      end_time: "",
-      start_date: "",
-      end_date: "",
-      students: [],
-      location: "",
-      type: "",
-    });
-  } catch (error) {
-    console.error("Error adding class:", error.message, error.details, error.hint);
-    alert("An error occurred while adding the class. Please try again.");
-  } finally {
-    setIsLoading(false);
-  }
-};
-
+  };
 
   return (
-    <Dialog open={open} onClose={handleClose} style={{ color: "#09090B" }}>
-      <DialogContent className="sm:max-w-[525px]" sx={{ backgroundColor: "#09090B", color: "#fafafa", borderRadius: '8px', border: '1px solid #ffffff', }}>
-        <h3 style={{ marginBottom: '0px' }}>Add New Class</h3>
-        <DialogContentText className="mt-2" sx={{ color: "#a1a1aa", fontSize: '14px' }}>
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
+      <DialogTitle>Add New Class</DialogTitle>
+
+      <DialogContent sx={{ backgroundColor: "#ffffff"}}>
+        <DialogContentText sx={{ color: "text.secondary", mb: 2 }}>
           Enter the details for the new class. Click save when you're done.
         </DialogContentText>
+
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4 mt-[20px]">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <InputLabel htmlFor="code" sx={{ color: "#fafafa" }}>Class Code</InputLabel>
-                <TextField
-                  id="code"
-                  name="code"
-                  placeholder="e.g., CS101"
-                  value={formData.code}
-                  onChange={handleInputChange}
-                  required
-                  sx={{color: "#fafafa", backgroundColor: "#18181b", borderRadius: '8px', margin: '5px 0',
-                    "& .MuiInputLabel-root.Mui-focused": { color: "#ffffff" },
-                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                      borderColor: "#ffffff",
-                      },
-                    "& .MuiOutlinedInput-root": {
-                      "& fieldset": { borderColor: "#27272a" },
-                      "&:hover fieldset": { borderColor: "#fafafa" },
-                      "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                    },
-                    "& .MuiInputBase-input": {
-                      color: "#fafafa",
-                      paddingLeft: '10px',
-                      height: '15px'
-                    },
-                    "& input:-webkit-autofill": {
-                      WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                      WebkitTextFillColor: "#fafafa",
-                      transition: "background-color 5000s ease-in-out 0s",
-                    },
-                  }}
-                  inputProps={{ style: { paddingLeft: '10px' } }}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <InputLabel htmlFor="name" sx={{ color: "#fafafa", marginTop: '10px' }}>Class Name</InputLabel>
-              <TextField
-                id="name"
-                name="name"
-                placeholder="e.g., Introduction to Programming"
-                value={formData.name}
-                onChange={handleInputChange}
-                required
-                style={{ width: '100%' }}
-                sx={{color: "#fafafa", backgroundColor: "#18181b", borderRadius: '8px', margin: '5px 0',
-                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                      borderColor: "#ffffff",
-                      },
-                    "& .MuiOutlinedInput-root": {
-                      "& fieldset": { borderColor: "#27272a" },
-                      "&:hover fieldset": { borderColor: "#fafafa" },
-                      "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                    },
-                    "& .MuiInputBase-input": {
-                      color: "#fafafa",
-                      paddingLeft: '10px',
-                      height: '15px'
-                    },
-                    "& input:-webkit-autofill": {
-                      WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                      WebkitTextFillColor: "#fafafa",
-                      transition: "background-color 5000s ease-in-out 0s",
-                    },
-                  }}
-                inputProps={{ style: { paddingLeft: '10px' } }}
-              />
-            </div>
-            <div className="space-y-2">
-              <InputLabel htmlFor="lecturer" sx={{ color: "#fafafa", marginTop: '10px' }}>Lecturer</InputLabel>
-              <TextField
-                select
-                id="lecturer"
-                name="lecturer"
-                placeholder="Select Lecturer"
-                value={formData.lecturer}
-                onChange={handleInputChange}
-                margin="normal"
-                required
-                style={{ width: '100%' }}
-                sx={{
-                  color: "#fafafa",
-                  backgroundColor: "#18181b",
-                  borderRadius: '8px',
-                  margin: '5px 0',
-                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                    borderColor: "#ffffff",
-                  },
-                  "& .MuiOutlinedInput-root": {
-                    "& fieldset": { borderColor: "#27272a" },
-                    "&:hover fieldset": { borderColor: "#fafafa" },
-                    "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                  },
-                  "& .MuiInputBase-input": {
-                    color: "#fafafa",
-                    paddingLeft: '10px',
-                    height: '15px'
-                  },
-                  "& input:-webkit-autofill": {
-                    WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                    WebkitTextFillColor: "#fafafa",
-                    transition: "background-color 5000s ease-in-out 0s",
-                  },
-                }}
-                inputProps={{ style: { paddingLeft: '10px' } }}
-                SelectProps={{ displayEmpty: true }}
-              >
-                {lecturers.length === 0 ? (
-                  <MenuItem disabled>Loading lecturers...</MenuItem>
-                ) : (
-                lecturers.map((lect) => (
-                  <MenuItem key={lect.id} value={lect.id}>
-                    {lect.name}
-                  </MenuItem>
-                ))
-              )}
-              </TextField>
-            </div>
-            <div className="space-y-2">
-              <InputLabel htmlFor="type" sx={{ color: "#fafafa" }}>Class Type</InputLabel>
-              <TextField
-                id="type"
-                name="type"
-                select
-                value={formData.type}
-                onChange={handleInputChange}
-                required
-                sx={{
-                  color: "#fafafa",
-                  backgroundColor: "#18181b",
-                  borderRadius: '8px',
-                  margin: '5px 0',
-                  "& .MuiInputLabel-root.Mui-focused": { color: "#ffffff" },
-                  "&.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#ffffff" },
-                  "& .MuiOutlinedInput-root": {
-                    "& fieldset": { borderColor: "#27272a" },
-                    "&:hover fieldset": { borderColor: "#fafafa" },
-                    "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                  },
-                  "& .MuiInputBase-input": {
-                    color: "#fafafa",
-                    paddingLeft: '10px',
-                    height: '15px'
-                  },
-                  "& input:-webkit-autofill": {
-                    WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                    WebkitTextFillColor: "#fafafa",
-                    transition: "background-color 5000s ease-in-out 0s",
-                  },
-                }}
-                inputProps={{ style: { paddingLeft: '10px' } }}
-                SelectProps={{ displayEmpty: true }}
-              >
+          <Box display="grid" gap={2} gridTemplateColumns={{ xs: "1fr", md: "1fr 1fr" }}>
+            <Box>
+              <InputLabel htmlFor="type" sx={{ mb: 1 }}>Class Type</InputLabel>
+              <TextField select id="type" name="type" value={formData.type} onChange={handleInputChange} required sx={inputSx}>
                 <MenuItem value="" disabled>Select type</MenuItem>
                 <MenuItem value="Lecture">Lecture</MenuItem>
                 <MenuItem value="Tutorial">Tutorial</MenuItem>
               </TextField>
-            </div>
-            <div className="space-y-2">
-              <ScheduleInput 
-                formData={formData} 
-                handleInputChange={handleInputChange}
-                setFormData={setFormData}
-              />
-            </div>
-            <div className="space-y-2" style={{ marginTop: '20px' }}>
-              <div className="space-y-2" style={{ marginTop: '20px' }}>
-                <InputLabel htmlFor="location" sx={{ color: "#fafafa" }}>Location</InputLabel>
-                <TextField
-                  id="location"
-                  name="location"
-                  placeholder="e.g., Room 101"
-                  value={formData.location}
-                  onChange={handleInputChange}
-                  required
-                  style={{ width: '100%' }}
-                  sx={{
-                    color: "#fafafa",
-                    backgroundColor: "#18181b",
-                    borderRadius: '8px',
-                    margin: '5px 0',
-                    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-                      borderColor: "#ffffff",
-                    },
-                    "& .MuiOutlinedInput-root": {
-                      "& fieldset": { borderColor: "#27272a" },
-                      "&:hover fieldset": { borderColor: "#fafafa" },
-                      "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-                    },
-                    "& .MuiInputBase-input": {
-                      color: "#fafafa",
-                      paddingLeft: '10px',
-                      height: '15px'
-                    },
-                    "& input:-webkit-autofill": {
-                      WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-                      WebkitTextFillColor: "#fafafa",
-                      transition: "background-color 5000s ease-in-out 0s",
-                    },
-                  }}
-                  inputProps={{ style: { paddingLeft: '10px' } }}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <StudentSearch
-                formData={formData}
-                handleInputChange={handleInputChange}
-                setFormData={setFormData}
-              />
-            </div>
-          </div>
-          <DialogActions className="mt-[10px]">
-            <Button type="button" variant="outlined" onClick={handleClose} style={{color: "#fafafa", borderColor: "#27272a"}}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isLoading} style={{color: "#09090b", backgroundColor: "#ffffff"}}>
-              {isLoading ? "Adding..." : "Add Class"}
-            </Button>
+            </Box>
+
+            {formData.type === "Tutorial" && (
+              <Box sx={{ gridColumn: "1 / -1" }}>
+                <InputLabel htmlFor="parentCourseId" sx={{ mb: 1 }}>Lecture Course</InputLabel>
+                <TextField select id="parentCourseId" name="parentCourseId" value={formData.parentCourseId} onChange={handleParentCourseChange} required sx={inputSx}>
+                  {courses.map((course) => (
+                    <MenuItem key={course.id} value={course.id}>
+                      {course.course_code} - {course.course_title}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
+            )}
+
+            <Box>
+              <InputLabel htmlFor="code" sx={{ mb: 1 }}>Class Code</InputLabel>
+              <TextField id="code" name="code" placeholder="e.g., CS101" value={formData.code} onChange={handleInputChange} required sx={inputSx} disabled={formData.type === "Tutorial"} />
+            </Box>
+
+            <Box>
+              <InputLabel htmlFor="lecturer" sx={{ mb: 1 }}>Lecturer</InputLabel>
+              <TextField select id="lecturer" name="lecturer" value={formData.lecturer} onChange={handleInputChange} sx={inputSx}>
+                {lecturers.length === 0 ? <MenuItem disabled>Loading lecturers...</MenuItem> : lecturers.map((lect) => <MenuItem key={lect.id} value={lect.id}>{lect.name}</MenuItem>)}
+              </TextField>
+            </Box>
+
+            <Box sx={{ gridColumn: "1 / -1" }}>
+              <InputLabel htmlFor="name" sx={{ mb: 1 }}>Class Name</InputLabel>
+              <TextField id="name" name="name" placeholder="e.g., Introduction to Programming" value={formData.name} onChange={handleInputChange} required fullWidth sx={inputSx} disabled={formData.type === "Tutorial"} />
+            </Box>
+
+            <Box sx={{ gridColumn: "1 / -1" }}>
+              <ScheduleInput formData={formData} handleInputChange={handleInputChange} setFormData={setFormData} />
+            </Box>
+
+            <Box sx={{ gridColumn: "1 / -1" }}>
+              <InputLabel htmlFor="location" sx={{ mb: 1 }}>Location</InputLabel>
+              <Box display="flex" gap={1}>
+                <TextField id="location" name="location" placeholder="e.g., Room 101" value={formData.location} onChange={handleInputChange} fullWidth sx={inputSx} />
+                <Button variant="outlined" onClick={() => setFormData(prev => ({ ...prev, location: "Online" }))}>Online</Button>
+              </Box>
+            </Box>
+
+            <Box sx={{ gridColumn: "1 / -1" }}>
+              <StudentSearch formData={formData} handleInputChange={handleInputChange} setFormData={setFormData} />
+            </Box>
+          </Box>
+
+          <DialogActions sx={{ mt: 2, borderTop: "1px solid #e6edf3", pt: 2 }}>
+            <Button variant="outlined" onClick={handleClose}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={isLoading}>{isLoading ? "Adding..." : "Add Class"}</Button>
           </DialogActions>
         </form>
       </DialogContent>
     </Dialog>
   );
-};
-
-export default AddClassDialog;
+}

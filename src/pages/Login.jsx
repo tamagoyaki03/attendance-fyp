@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useState } from "react";
 import {
   Box,
   Button,
@@ -13,109 +13,116 @@ import {
   TextField,
   Typography,
   Link as MuiLink,
-} from "@mui/material"
-import { Visibility, VisibilityOff } from "@mui/icons-material"
-import { useNavigate } from "react-router-dom"
+  CircularProgress,
+} from "@mui/material";
+import { Visibility, VisibilityOff } from "@mui/icons-material";
+import { useNavigate } from "react-router-dom";
 import { FaBell } from "react-icons/fa";
 import supabase from "../config/supabaseClient";
 
-const style = {
-  color: "#fafafa",
-  backgroundColor: "#18181b",
-  borderRadius: '8px',
-  margin: '5px 0',
-  "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-    borderColor: "#ffffff",
-  },
-  "& .MuiOutlinedInput-root": {
-    "& fieldset": { borderColor: "#27272a" },
-    "&:hover fieldset": { borderColor: "#fafafa" },
-    "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-  },
-  "& .MuiInputBase-input": {
-    color: "#fafafa",
-    paddingLeft: '10px',
-    height: '15px'
-  },
-  "& input:-webkit-autofill": {
-    WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-    WebkitTextFillColor: "#fafafa",
-    transition: "background-color 5000s ease-in-out 0s",
-  }
-}
-
 export default function LoginPage() {
-  const [showPassword, setShowPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [message, setMessage] = useState("")
-  const navigate = useNavigate()
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const navigate = useNavigate();
 
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      color: "#0f172a",
+      backgroundColor: "#fff",
+      borderRadius: 1,
+      "& fieldset": { borderColor: "#e6edf3" },
+      "&:hover fieldset": { borderColor: "#cbd5e1" },
+      "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+    },
+    "& .MuiInputLabel-root": { color: "#64748b" },
+    "& .MuiInputLabel-root.Mui-focused": { color: "#0f172a" },
+    input: { color: "#0f172a" },
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage("");
 
-    // Supabase sign in
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
+      if (error) {
+        setMessage(error.message);
+        setIsLoading(false);
+        return;
+      }
+
+      const { data: userProfile, error: userError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", data.user.id)
+        .single();
+
       setIsLoading(false);
-      setMessage(error.message);
-      return;
-    }
 
-    // Fetch user profile from your users table
-    const { data: userProfile, error: userError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", data.user.id)
-      .single();
-
-    setIsLoading(false);
-
-    if (userError || !userProfile) {
-      setMessage("Login successful, but failed to fetch user profile.");
-    } else {
-      // Normalize role for sidebar logic
-      const role =
-        userProfile.role === "admin" || userProfile.role === "Administrator"
-          ? "Administrator"
-          : "Lecturer";
-      sessionStorage.setItem(
-        "user",
-        JSON.stringify({ ...userProfile, role })
-      );
-      setMessage("Login successful!");
-      setTimeout(() => {
-        navigate("/dashboard");
-      }, 1000);
+      if (userError || !userProfile) {
+        setMessage("Login successful, but failed to fetch user profile.");
+      } else {
+        const role = userProfile.role === "admin" ? "admin" : "lecturer";
+        sessionStorage.setItem(
+          "user",
+          JSON.stringify({ id: userProfile.id, name: userProfile.name, role })
+        );
+        setMessage("Login successful!");
+        setTimeout(() => navigate("/dashboard"), 800);
+      }
+    } catch (err) {
+      setIsLoading(false);
+      setMessage("An unexpected error occurred.");
+      console.error(err);
     }
   };
 
-
   return (
-    <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="100vh" p={2} sx={{background: 'black' }}>
+    <Box
+      display="flex"
+      flexDirection="column"
+      alignItems="center"
+      justifyContent="center"
+      minHeight="100vh"
+      p={2}
+      sx={{ background: "#f8fafc" }}
+    >
       <Box display="flex" alignItems="center" gap={1} mb={4}>
-        <FaBell style={{ color: 'white', height: '24px', width: '24px' }} />
-        <Typography variant="h4" fontWeight="bold">
+        <FaBell style={{ color: "#0f172a", height: "24px", width: "24px" }} />
+        <Typography variant="h4" fontWeight="bold" color="#0f172a">
           Attendance
         </Typography>
       </Box>
 
-      <Card sx={{ width: "100%", maxWidth: 400 , background: "black", color: "#ffffff" }} className="border">
+      <Card
+        sx={{
+          width: "100%",
+          maxWidth: 440,
+          background: "#ffffff",
+          color: "#0f172a",
+          borderRadius: 2,
+          boxShadow: "none",
+          transition: "transform 160ms ease, box-shadow 160ms ease",
+          "&:hover": { transform: "translateY(-6px)", boxShadow: "0 10px 30px rgba(2,6,23,0.08)" },
+        }}
+      >
         <CardHeader
-          title={<Typography variant="h5" fontWeight="bold">Login</Typography>}
-          subheader="Enter your credentials to access the attendance management system"
+          title={<Typography variant="h5" fontWeight="bold" color="#0f172a">Login</Typography>}
+          subheader={<Typography variant="body2" color="text.secondary" sx={{ opacity: 0.95 }}>Enter your credentials to access the attendance management system</Typography>}
         />
-        <form onSubmit={handleLogin}>
-          <CardContent sx={{paddingTop: "0px", paddingBottom: "0px"}}>
-            <Typography fontSize={16} color="white" fontWeight={600}>
+
+        <form onSubmit={handleLogin} noValidate>
+          <CardContent sx={{ paddingTop: "0px", paddingBottom: "0px" }}>
+            <Typography fontSize={16} color="#0f172a" fontWeight={600}>
               Email
             </Typography>
             <TextField
@@ -126,9 +133,9 @@ export default function LoginPage() {
               required
               margin="normal"
               placeholder="admin@university.edu"
-              sx={style}
+              sx={inputSx}
             />
-            <Typography fontSize={16} color="white" fontWeight={600}>
+            <Typography fontSize={16} color="#0f172a" fontWeight={600}>
               Password
             </Typography>
             <TextField
@@ -138,12 +145,12 @@ export default function LoginPage() {
               fullWidth
               required
               placeholder="••••••••"
-              sx={style}
               margin="normal"
+              sx={inputSx}
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPassword((prev) => !prev)} edge="end">
+                    <IconButton onClick={() => setShowPassword((prev) => !prev)} edge="end" sx={{ color: "#0f172a" }}>
                       {showPassword ? <VisibilityOff /> : <Visibility />}
                     </IconButton>
                   </InputAdornment>
@@ -151,36 +158,44 @@ export default function LoginPage() {
               }}
             />
             <Box textAlign="right" mt={1}>
-              <MuiLink href="/forgot-password" variant="body2" underline="hover" color="text.secondary">
+              <MuiLink href="/forgot-password" variant="body2" underline="hover" sx={{ color: "#0f172a" }}>
                 Forgot password?
               </MuiLink>
             </Box>
+
             <FormControlLabel
-                control={
-                    <Checkbox
-                    sx={{
-                        color: "#fafafa",
-                        '&.Mui-checked': {
-                        color: "#fafafa",
-                        },
-                    }}
-                    />
-                }
-                label={<span style={{ color: "#fafafa" }}>Remember me for 30 days</span>}
+              control={
+                <Checkbox
+                  sx={{
+                    color: "#0f172a",
+                    "&.Mui-checked": { color: "#0f172a" },
+                  }}
                 />
+              }
+              label={<span style={{ color: "#0f172a" }}>Remember me for 30 days</span>}
+            />
+
             {message && (
-              <Typography color={message.includes("success") ? "success.main" : "error.main"} mt={2}>
+              <Typography color={message.includes("successful") ? "success.main" : "error.main"} mt={2}>
                 {message}
               </Typography>
             )}
           </CardContent>
+
           <CardActions sx={{ flexDirection: "column", alignItems: "stretch", px: 2, pb: 2 }}>
-            <Button variant="contained" style={{ background: "white" }} type="submit" fullWidth disabled={isLoading}>
-              {isLoading ? "Logging in..." : "Login"}
+            <Button
+              variant="contained"
+              type="submit"
+              fullWidth
+              disabled={isLoading}
+              sx={{ backgroundColor: "#0f172a", color: "#fff", textTransform: "none", "&:hover": { backgroundColor: "#0b1320" } }}
+            >
+              {isLoading ? <CircularProgress size={20} sx={{ color: "#fff" }} /> : "Login"}
             </Button>
-            <Typography variant="body2" align="center" mt={1}>
+
+            <Typography variant="body2" align="center" mt={1} color="text.secondary">
               Don't have an account?{" "}
-              <MuiLink href="/signup" fontWeight={600} color="#fff">
+              <MuiLink href="/signup" fontWeight={600} sx={{ color: "#0f172a" }}>
                 Sign up
               </MuiLink>
             </Typography>
@@ -188,5 +203,5 @@ export default function LoginPage() {
         </form>
       </Card>
     </Box>
-  )
+  );
 }

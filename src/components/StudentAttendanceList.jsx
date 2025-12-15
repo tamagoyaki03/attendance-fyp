@@ -6,24 +6,24 @@ import {
 import { Search as SearchIcon } from "@mui/icons-material";
 import supabase from "../config/supabaseClient";
 
-export default function StudentAttendanceList({
-  statusFilter = "all",
-  onSelectStudent,
-  classAttendanceId
-}) {
+export default function StudentAttendanceList({ classData = {} }) {
+  const {
+    statusFilter = "all",
+    onSelectStudent,
+    classAttendanceId
+  } = classData;
+
   const [searchQuery, setSearchQuery] = useState("");
   const [students, setStudents]   = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error,   setError]       = useState(null);
 
-const fetchStudents = useCallback(async () => {
+  const fetchStudents = useCallback(async () => {
     if (!classAttendanceId) return;
-
     try {
       setLoading(true);
       setError(null);
 
-      /* ── 1. attendance_session row ─────────────────────────────────── */
       const { data: session, error: sessionError } = await supabase
         .from("attendance_session")
         .select("id, course_lecture_id")
@@ -32,7 +32,6 @@ const fetchStudents = useCallback(async () => {
 
       if (sessionError || !session) throw new Error("Session not found");
 
-      /* ── 2. enrolled students for that lecture course ──────────────── */
       const { data: enrollments, error: enrollError } = await supabase
         .from("enrollment_lecture")
         .select(`
@@ -44,7 +43,6 @@ const fetchStudents = useCallback(async () => {
 
       if (enrollError) throw enrollError;
 
-      /* ── 3. attendance records for THIS session ────────────────────── */
       const { data: attendanceRecords, error: arError } = await supabase
         .from("attendance_record")
         .select("*")
@@ -52,28 +50,24 @@ const fetchStudents = useCallback(async () => {
 
       if (arError) throw arError;
 
-      /* ── 4. map the latest record per enrollment ───────────────────── */
       const recordsMap = new Map();
       attendanceRecords?.forEach((record) => {
         recordsMap.set(record.lecture_enrollment_id, record);
-        }
-      );
+      });
 
       const mappedStudents = enrollments.map((enroll) => {
-      const record = recordsMap.get(enroll.id); // enroll.id is lecture_enrollment_id
-
-      return {
-        id: enroll.id,
-        studentId: enroll.student_id,
-        name: enroll.users?.name ?? "Unknown",
-        status: record?.status ?? "absent", // fallback if not found
-        checkInTime: record?.created_at ?? null,
-        checkInLocation: record?.latitude && record?.longitude
-          ? { lat: record.latitude, lng: record.longitude }
-          : null,
-      };
-    });
-
+        const record = recordsMap.get(enroll.id);
+        return {
+          id: enroll.id,
+          studentId: enroll.student_id,
+          name: enroll.users?.name ?? "Unknown",
+          status: record?.status ?? "absent",
+          checkInTime: record?.created_at ?? null,
+          checkInLocation: record?.latitude && record?.longitude
+            ? { lat: record.latitude, lng: record.longitude }
+            : null,
+        };
+      });
 
       setStudents(mappedStudents);
     } catch (err) {
@@ -86,51 +80,51 @@ const fetchStudents = useCallback(async () => {
 
   useEffect(() => {
     fetchStudents();
-    const interval = setInterval(fetchStudents, 10000); // Poll every 5 seconds
-  return () => clearInterval(interval);
+    const interval = setInterval(fetchStudents, 10000);
+    return () => clearInterval(interval);
   }, [fetchStudents]);
 
   useEffect(() => {
-    if (!classAttendanceId) return;
+    if (!classData?.id) return;
+    
+    let isMounted = true;
+    const fetchStudents = async () => {
+      try {
+        // Determine table and field based on class type
+        const enrollmentTable = classData.type === "Tutorial" ? "enrollment_tutorial" : "enrollment_lecture";
+        const enrollIdField = classData.type === "Tutorial" ? "tutorial_id" : "course_id";
 
-    // listen only to rows belonging to THIS session
-    const channel = supabase
-      .channel(`attendance-record-${classAttendanceId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",                    // INSERT | UPDATE | DELETE
-          schema: "public",
-          table: "attendance_record",
-          filter: `session_id=eq.${classAttendanceId}`,
-        },
-        () => fetchStudents()            // re‑query whenever anything changes
-      )
-      .subscribe();
+        const { data: enrollments, error } = await supabase
+          .from(enrollmentTable)
+          .select("id, student_id, users(id, name)")
+          .eq(enrollIdField, classData.id);
 
-    // housekeeping
-    return () => {
-      supabase.removeChannel(channel);
+        if (error) throw error;
+
+        if (isMounted) {
+          setStudents(enrollments || []);
+        }
+      } catch (error) {
+        console.error("Error fetching students:", error);
+        if (isMounted) setStudents([]);
+      }
     };
-  }, [classAttendanceId, fetchStudents]);
+    fetchStudents();
+    return () => { isMounted = false; };
+  }, [classData?.id, classData?.type]);
 
-  // Filter by search query and statusFilter
-  const filteredStudents = students.filter(
-  (student) => {
+  const filteredStudents = students.filter((student) => {
     const matchesSearch =
       student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       student.studentId.toLowerCase().includes(searchQuery.toLowerCase());
-
     const matchesStatus =
       statusFilter === "all" ||
-      (statusFilter === "present" && (student.status === "present")) ||
+      (statusFilter === "present" && student.status === "present") ||
       (statusFilter === "absent" && student.status === "absent") ||
       (statusFilter === "excused" && student.status === "excused") ||
       (statusFilter === "flagged" && student.status === "flagged");
-
     return matchesSearch && matchesStatus;
-  }
-);
+  });
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -163,13 +157,14 @@ const fetchStudents = useCallback(async () => {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginTop: '16px' }}>
+    <Box display="flex" flexDirection="column" gap={2}>
+      <Box display="flex" alignItems="center" mt={1}>
         <TextField
           fullWidth
           placeholder="Search students..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          size="small"
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -177,44 +172,47 @@ const fetchStudents = useCallback(async () => {
               </InputAdornment>
             ),
           }}
+          sx={{
+            backgroundColor: "#ffffff",
+            borderRadius: 1,
+            "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+          }}
         />
-      </div>
+      </Box>
 
-      <TableContainer component={Paper} className="border" sx={{ background: '#09090b', color: '#fff' }}>
+      <TableContainer component={Paper} sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "none" }}>
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell sx={{ color: '#fff' }}>Student Name</TableCell>
-              <TableCell sx={{ color: '#fff' }}>Student ID</TableCell>
-              <TableCell sx={{ color: '#fff' }}>Status</TableCell>
-              <TableCell sx={{ color: '#fff' }}>Check-in Time</TableCell>
-              <TableCell align="right" sx={{ color: '#fff' }}>Actions</TableCell>
+              <TableCell>Student Name</TableCell>
+              <TableCell>Student ID</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Check-in Time</TableCell>
+              <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
+
           <TableBody>
             {filteredStudents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} style={{ height: '96px', textAlign: 'center', color: '#fff' }}> {/* Updated colspan */}
+                <TableCell colSpan={5} style={{ height: 96, textAlign: "center" }}>
                   No students found matching your criteria.
                 </TableCell>
               </TableRow>
             ) : (
               filteredStudents.map((student) => (
                 <TableRow key={student.id}>
-                  <TableCell sx={{ color: '#fff' }}>
-                    <div style={{ fontWeight: 500 }}>{student.name}</div>
+                  <TableCell>
+                    <Typography fontWeight={500}>{student.name}</Typography>
                   </TableCell>
-                  <TableCell sx={{ color: '#fff' }}>{student.studentId}</TableCell>
-                  <TableCell sx={{ color: '#fff' }}>{getStatusBadge(student.status)}</TableCell>
-                  <TableCell sx={{ color: '#fff' }}>
-                    {student.checkInTime ? new Date(student.checkInTime).toLocaleTimeString() : "N/A"}
-                  </TableCell>
-                  <TableCell align="right" sx={{ color: '#fff' }}>
+                  <TableCell>{student.studentId}</TableCell>
+                  <TableCell>{getStatusBadge(student.status)}</TableCell>
+                  <TableCell>{student.checkInTime ? new Date(student.checkInTime).toLocaleTimeString() : "N/A"}</TableCell>
+                  <TableCell align="right">
                     <Button
                       variant="text"
                       size="small"
                       onClick={() => onSelectStudent(student)}
-                      sx={{ color: '#fff' }}
                     >
                       View Details
                     </Button>
@@ -225,6 +223,6 @@ const fetchStudents = useCallback(async () => {
           </TableBody>
         </Table>
       </TableContainer>
-    </div>
+    </Box>
   );
 }

@@ -5,57 +5,52 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  TableContainer,
+  Paper,
   Button,
+  Typography,
+  Box,
 } from "@mui/material";
 import Chip from "@mui/material/Chip";
 import supabase from "../config/supabaseClient";
 
-export default function FraudTable( {searchTerm }) {
+export default function FraudTable({ searchTerm = "", courseId }) {
   const [alerts, setAlerts] = useState([]);
-  const [snackbar, setSnackbar] = useState({ open: false, message: ""});
   const [usersMap, setUsersMap] = useState({});
 
   useEffect(() => {
-  const fetchData = async () => {
-    // 1. Fetch attendance issues
-    const { data: issues, error: issuesError } = await supabase
-      .from("attendance_issues")
-      .select("*");
+    const fetchData = async () => {
+      const { data: issues, error: issuesError } = await supabase
+        .from("attendance_issues")
+        .select("*");
 
-    if (issuesError) {
-      console.error("Error fetching attendance issues:", issuesError.message);
-      return;
-    }
+      if (issuesError) {
+        console.error("Error fetching attendance issues:", issuesError.message);
+        return;
+      }
 
-    setAlerts(issues || []);
+      setAlerts(issues || []);
 
-    // 2. Get unique user_ids
-    const userIds = [...new Set((issues || []).map((i) => i.user_id))];
+      const userIds = [...new Set((issues || []).map((i) => i.user_id))];
 
-    // 3. Fetch from auth.users
-    const { data: users, error: usersError } = await supabase
-      .from("users") // this works because RLS is OFF on auth.users
-      .select("id, name") // you can also try `full_name` if you have it
-      .in("id", userIds);
+      if (userIds.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from("users")
+          .select("id, name")
+          .in("id", userIds);
 
-    if (usersError) {
-      console.error("Error fetching users:", usersError.message);
-      return;
-    }
+        if (!usersError && users) {
+          const map = {};
+          users.forEach((u) => (map[u.id] = u));
+          setUsersMap(map);
+        }
+      }
+    };
 
-    // 4. Build a map of user_id -> user
-    const userMap = {};
-    (users || []).forEach((u) => {
-      userMap[u.id] = u;
-    });
+    fetchData();
+  }, []);
 
-    setUsersMap(userMap);
-  };
-
-  fetchData();
-}, []);
-
-const term = searchTerm.toLowerCase();
+  const term = (searchTerm || "").toLowerCase();
   const filteredData = alerts.filter((row) =>
     term
       ? (row.issue_type ?? "").toLowerCase().includes(term) ||
@@ -64,82 +59,104 @@ const term = searchTerm.toLowerCase();
   );
 
   const handleResolve = async (id) => {
-    // Update status in DB
-    await supabase
-      .from("attendance_issues")
-      .update({ status: "Resolved" })
-      .eq("id", id);
+    await supabase.from("attendance_issues").update({ status: "resolved" }).eq("id", id);
 
-    setAlerts(alerts.map((alert) => (alert.id === id ? { ...alert, status: "Resolved" } : alert)));
-    setSnackbar({
-      title: "Alert resolved",
-      description: "The fraud alert has been marked as resolved.",
-    });
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, status: "resolved" } : a)));
   };
 
   const getStatusBadge = (status) => {
-    switch (status) {
+    const s = (status || "").toLowerCase();
+    switch (s) {
       case "pending":
-      return (
-        <Chip variant="outlined" sx={{borderColor: "#ffeb3b", color:"#ffeb3b"}} label="Pending" />
-      )
+        return <Chip label="Pending" variant="outlined" sx={{ borderColor: "#f59e0b", color: "#b45309" }} size="small" />;
       case "open":
-        return (
-          <Chip variant="outline" className="border-red-500 text-red-500">
-            Open
-          </Chip>
-        )
+        return <Chip label="Open" color="error" variant="outlined" size="small" />;
       case "resolved":
-        return (
-          <Chip variant="outline" sx={{color:"#008000", backgroundColor: "transparent"}} label="Resolved" />
-        )
+        return <Chip label="Resolved" color="success" variant="outlined" size="small" />;
       default:
-        return <Chip variant="outline">Unknown</Chip>
+        return <Chip label={status || "Unknown"} size="small" />;
     }
-  }
+  };
 
   return (
-    <div className="rounded-md border">
+    <TableContainer
+      component={Paper}
+      sx={{
+        background: "#ffffff",
+        border: "1px solid #e6edf3",
+        boxShadow: "none",
+        borderRadius: 1,
+      }}
+    >
       <Table>
         <TableHead>
           <TableRow>
             <TableCell>Student</TableCell>
-            <TableCell>Course</TableCell>
+            <TableCell>Course / Session</TableCell>
             <TableCell>Date & Time</TableCell>
             <TableCell>Type</TableCell>
             <TableCell>Details</TableCell>
             <TableCell>Status</TableCell>
-            <TableCell className="ml-[40px]">Actions</TableCell>
+            <TableCell align="right">Actions</TableCell>
           </TableRow>
         </TableHead>
+
         <TableBody>
-          {filteredData.map((alerts) => (
-            <TableRow key={alerts.id}>
-              <TableCell>
-                <div className="font-medium">{usersMap[alerts.user_id]?.name || "Unknown"}</div>
-              </TableCell>
-              <TableCell>{alerts.session_id}</TableCell>
-              <TableCell>
-                <div>{alerts.created_at?.split("T")[0]}</div>
-                <div className="text-xs text-muted-foreground">{alerts.created_at?.split("T")[1]?.slice(0, 8)}</div>
-              </TableCell>
-              <TableCell>{alerts.issue_type}</TableCell>
-              <TableCell className="max-w-[200px] truncate">{alerts.description}</TableCell>
-              <TableCell>{getStatusBadge(alerts.status)}</TableCell>
-              <TableCell>
-                <div className="flex space-x-2">
-                  {["open", "pending"].includes(alerts.status) && (
-                    <Button size="small" variant="outlined" onClick={() => handleResolve(alert.id)}>
-                      Resolve
-                    </Button>
-                  )}
-                </div>
+          {filteredData.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={7} sx={{ textAlign: "center", py: 6, color: "text.secondary" }}>
+                No fraud alerts found.
               </TableCell>
             </TableRow>
-          ))}
+          ) : (
+            filteredData.map((alert) => (
+              <TableRow key={alert.id}>
+                <TableCell>
+                  <Typography fontWeight={500}>
+                    {usersMap[alert.user_id]?.name || "Unknown"}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {alert.user_id}
+                  </Typography>
+                </TableCell>
+
+                <TableCell>
+                  <Typography>{alert.course_code || alert.session_id || "-"}</Typography>
+                </TableCell>
+
+                <TableCell>
+                  <Box>
+                    <Typography>{alert.created_at?.split("T")[0] ?? "-"}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {alert.created_at?.split("T")[1]?.slice(0, 8) ?? "-"}
+                    </Typography>
+                  </Box>
+                </TableCell>
+
+                <TableCell>{alert.issue_type}</TableCell>
+
+                <TableCell sx={{ maxWidth: 300 }}>
+                  <Typography variant="body2" noWrap>
+                    {alert.description}
+                  </Typography>
+                </TableCell>
+
+                <TableCell>{getStatusBadge(alert.status)}</TableCell>
+
+                <TableCell align="right">
+                  <Box display="flex" justifyContent="flex-end" gap={1}>
+                    {["open", "pending"].includes((alert.status || "").toLowerCase()) && (
+                      <Button size="small" variant="contained" onClick={() => handleResolve(alert.id)}>
+                        Resolve
+                      </Button>
+                    )}
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ))
+          )}
         </TableBody>
       </Table>
-    </div>
-  )
+    </TableContainer>
+  );
 }
-

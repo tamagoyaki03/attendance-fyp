@@ -1,82 +1,62 @@
-import React, { useState, useEffect } from 'react';
-import { InputLabel, TextField, Autocomplete, Chip, CircularProgress } from '@mui/material';
-import supabase from '../../config/supabaseClient';
+import React, { useState, useEffect } from "react";
+import { InputLabel, TextField, Autocomplete, Chip, CircularProgress, Box } from "@mui/material";
+import supabase from "../../config/supabaseClient";
 
-const StudentSearch = ({ formData, setFormData }) => {
-  const [allStudents, setAllStudents] = useState([]); // all fetched students
-  const [inputValue, setInputValue] = useState('');   // search box value
+const StudentSearch = ({ formData = {}, setFormData }) => {
+  const [allStudents, setAllStudents] = useState([]);
+  const [inputValue, setInputValue] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // 🔑 Fetch all students once on mount
   useEffect(() => {
     const fetchAllStudents = async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, name')
-        .eq('role', 'student');
-
+      const { data, error } = await supabase.from("users").select("id, name").eq("role", "student");
       if (error) {
-        console.error('Error fetching students:', error);
+        console.error("Error fetching students:", error);
         setAllStudents([]);
       } else {
         setAllStudents(data || []);
       }
       setLoading(false);
     };
-
     fetchAllStudents();
   }, []);
 
-  // Keep selected students in sync with formData
   const selectedStudents = Array.isArray(formData.students) ? formData.students : [];
 
-  // Filtered options based on search input
   const filteredOptions = allStudents.filter(
-    (student) =>
-      student.name.toLowerCase().includes(inputValue.toLowerCase()) ||
-      student.id.toString().includes(inputValue)
+    (s) =>
+      s.name.toLowerCase().includes(inputValue.toLowerCase()) ||
+      (s.id && s.id.toString().includes(inputValue))
   );
 
-  const handleChange = (event, newValue) => {
-    // update selected students
-    setFormData((prev) => ({
-      ...prev,
-      students: newValue,
-    }));
+  const handleChange = (_, newValue) => {
+    setFormData({ ...formData, students: newValue });
   };
 
   return (
-    <div className="space-y-2">
-      <InputLabel htmlFor="students" sx={{ color: "#fafafa", marginTop: '10px' }}>
-        Students
-      </InputLabel>
-
+    <Box>
+      <InputLabel sx={{ mb: 1 }}>Students</InputLabel>
       <Autocomplete
         multiple
-        id="students"
+        id="students-autocomplete"
         options={filteredOptions}
         getOptionLabel={(option) => `${option.name}`}
         value={selectedStudents}
         onChange={handleChange}
         inputValue={inputValue}
-        onInputChange={(_, newInputValue) => setInputValue(newInputValue)}
+        onInputChange={(_, newInput) => setInputValue(newInput)}
         loading={loading}
+        renderTags={(value, getTagProps) =>
+          value.map((option, index) => (
+            <Chip variant="outlined" label={option.name} size="small" {...getTagProps({ index })} />
+          ))
+        }
         renderInput={(params) => (
           <TextField
             {...params}
             placeholder="Search students..."
-            sx={{
-              color: "#fafafa",
-              backgroundColor: "#18181b",
-              borderRadius: '8px',
-              margin: '5px 0',
-              input: { color: '#fafafa', paddingLeft: '10px' },
-              "& .MuiOutlinedInput-root": {
-                "&:hover fieldset": { borderColor: "#fafafa" },
-                "&.Mui-focused fieldset": { borderColor: "#ffffff" },
-              },
-            }}
+            size="small"
             InputProps={{
               ...params.InputProps,
               endAdornment: (
@@ -86,10 +66,14 @@ const StudentSearch = ({ formData, setFormData }) => {
                 </>
               ),
             }}
+            sx={{
+              backgroundColor: "#ffffff",
+              "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+            }}
           />
         )}
       />
-    </div>
+    </Box>
   );
 };
 

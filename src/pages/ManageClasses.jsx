@@ -1,15 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import supabase from "../config/supabaseClient";
-import Sidebar from '../components/Sidebar';
-import Button from '../components/Button';
-import InputField from '../components/InputField';
+import Sidebar from "../components/Sidebar";
+import Button from "../components/Button";
 import { FaSearch } from "react-icons/fa";
 import { IoIosAdd } from "react-icons/io";
 import { FiEdit } from "react-icons/fi";
 import { RiDeleteBin6Line } from "react-icons/ri";
 import { GoPeople } from "react-icons/go";
 import AddClassDialog from "../components/Event/AddClassDialog";
-import EditClassDialog from '../components/Event/EditClassDialog';
+import EditClassDialog from "../components/Event/EditClassDialog";
+import {
+  Box,
+  Card,
+  CardContent,
+  TextField,
+  InputAdornment,
+  TableContainer,
+  Paper,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  IconButton,
+  Typography,
+} from "@mui/material";
 
 const ManageClasses = () => {
   const [fetchError, setFetchError] = useState(null);
@@ -17,106 +32,85 @@ const ManageClasses = () => {
   const [openAddClassDialog, setOpenAddClassDialog] = useState(false);
   const [selectedClass, setSelectedClass] = useState(null);
   const [openEditClassDialog, setOpenEditClassDialog] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-
-  const dummyLecturers = [
-    { id: "lect1", name: "Ada Lovelace" },
-    { id: "lect2", name: "Grace Chin" },
-    { id: "lect3", name: "Sofya" },
-    { id: "lect4", name: "Charlie Tan" },
-    { id: "lect5", name: "Johnathan" }
-  ];
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-  fetchClasses();
-}, []);
+    fetchClasses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchClasses = async () => {
-  try {
-    console.log("Fetching classes...");
+    try {
+      // fetch lectures, tutorials, users and enrollments in parallel
+      const [
+        { data: lectures, error: lectureError },
+        { data: tutorials, error: tutorialError },
+        { data: users, error: usersError },
+        { data: lectureEnrollments, error: enrollLectureError },
+        { data: tutorialEnrollments, error: enrollTutorialError },
+      ] = await Promise.all([
+        supabase.from("course_lecture").select("*"),
+        supabase
+          .from("course_tutorial")
+          .select(`
+            *,
+            course:course_lecture (
+              id,
+              course_title,
+              course_code
+            )
+          `),
+        supabase.from("users").select("id, name"),
+        supabase.from("enrollment_lecture").select("course_id"),
+        supabase.from("enrollment_tutorial").select("tutorial_id"),
+      ]);
 
-    // 1️⃣  Get lectures + tutorials
-    const [{ data: lectures, error: lectureError },
-      { data: tutorials, error: tutorialError },
-      { data: users, error: usersError },
-      { data: lectureEnrollments, error: enrollLectureError },
-      { data: tutorialEnrollments, error: enrollTutorialError }] = await Promise.all([
-      supabase.from('course_lecture').select('*'),
-      supabase
-      .from('course_tutorial')
-      .select(`
-        *,
-        course:course_lecture (
-          id,
-          course_title,
-          course_code
-        )
-      `),
-      supabase.from('users').select('id, name'),
-      supabase.from('enrollment_lecture').select('course_id'),
-      supabase.from('enrollment_tutorial').select('tutorial_id'),
-    ]);
+      if (lectureError || tutorialError || usersError || enrollLectureError || enrollTutorialError) {
+        setFetchError("Could not fetch classes");
+        setClasses([]);
+        return;
+      }
 
-    console.log('Lectures:', lectures);
-    console.log('Tutorials:', tutorials);
-    console.log('Users:', users);
-    console.log('Lecture Enrollments:', lectureEnrollments);
-    console.log('Tutorial Enrollments:', tutorialEnrollments);
+      const lecturerMap = {};
+      users?.forEach((u) => {
+        lecturerMap[u.id] = u.name;
+      });
 
-    if (lectureError || tutorialError || usersError || enrollLectureError || enrollTutorialError) {
-      console.error('Errors:', lectureError, tutorialError, usersError, enrollLectureError, enrollTutorialError);
-      setFetchError('Could not fetch classes');
-      setClasses(null);
-      return;
+      const lectureEnrollmentCount = {};
+      (lectureEnrollments || []).forEach((e) => {
+        lectureEnrollmentCount[e.course_id] = (lectureEnrollmentCount[e.course_id] || 0) + 1;
+      });
+
+      const tutorialEnrollmentCount = {};
+      (tutorialEnrollments || []).forEach((e) => {
+        tutorialEnrollmentCount[e.tutorial_id] = (tutorialEnrollmentCount[e.tutorial_id] || 0) + 1;
+      });
+
+      const merged = [
+        ...(lectures || []).map((item) => ({
+          ...item,
+          type: "Lecture",
+          lecturer_name: lecturerMap[item.lecturer_id] || "Unknown",
+          num_students: lectureEnrollmentCount[item.id] || 0,
+        })),
+        ...(tutorials || []).map((item) => ({
+          ...item,
+          type: "Tutorial",
+          course_code: item.course?.course_code,
+          course_title: item.course?.course_title,
+          lecturer_name: lecturerMap[item.lecturer_id] || "Unknown",
+          num_students: tutorialEnrollmentCount[item.id] || 0,
+        })),
+      ];
+
+      setClasses(merged);
+      setFetchError(null);
+    } catch (error) {
+      console.error("Unexpected error:", error);
+      setFetchError("Could not fetch classes");
+      setClasses([]);
     }
-
-    // 2️⃣  Map: user.id -> name
-    const lecturerMap = {};
-    users?.forEach(u => {
-      lecturerMap[u.id] = u.name;
-    });
-
-    // 3️⃣  Map: lecture.id -> enrollment count
-    const lectureEnrollmentCount = {};
-    lectureEnrollments?.forEach(e => {
-      lectureEnrollmentCount[e.course_id] = (lectureEnrollmentCount[e.course_id] || 0) + 1;
-    });
-
-    const tutorialEnrollmentCount = {};
-    tutorialEnrollments?.forEach(e => {
-      tutorialEnrollmentCount[e.course_id] = (tutorialEnrollmentCount[e.tutorial_id] || 0) + 1;
-    });
-
-    // 4️⃣  Merge
-    const merged = [
-      ...(lectures || []).map(item => ({
-        ...item,
-        type: 'Lecture',
-        lecturer_name: lecturerMap[item.lecturer_id] || 'Unknown',
-        num_students: lectureEnrollmentCount[item.id] || 0,
-      })),
-      ...(tutorials || []).map(item => ({
-      ...item,
-      type: 'Tutorial',
-      course_code: item.course?.course_code,
-      course_title: item.course?.course_title,
-      lecturer_name: lecturerMap[item.lecturer_id] || 'Unknown',
-      num_students: tutorialEnrollmentCount[item.id] || 0,
-})),
-
-    ];
-
-    console.log('Merged:', merged);
-
-    setClasses(merged);
-    setFetchError(null);
-
-  } catch (error) {
-    console.error('Unexpected error:', error);
-    setFetchError('Could not fetch classes');
-    setClasses(null);
-  }
-};
+  };
 
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
@@ -126,147 +120,152 @@ const ManageClasses = () => {
     const confirmed = window.confirm("Are you sure you want to delete this class?");
     if (!confirmed) return;
 
-    // const table = classItem.type === 'Lecture' ? 'course_lecture' : 'course_tutorial';
+    await supabase.from("enrollment_lecture").delete().eq("course_id", classItem.id);
+    await supabase.from("course_lecture").delete().eq("id", classItem.id);
 
-    const { error } = 
-    //   .from(table)
-    //   .delete()
-    //   .eq('id', classItem.id);
-    // Delete enrollments first
-    await supabase
-      .from('enrollment_lecture')
-      .delete()
-      .eq('course_id', classItem.id);
-
-    // Then delete the class
-    await supabase
-      .from('course_lecture')
-      .delete()
-      .eq('id', classItem.id);
-
-    if (error) {
-      console.error("Failed to delete class:", error.message);
-    } else {
-      console.log("Class deleted successfully");
-      fetchClasses();
-    }
+    fetchClasses();
   };
 
   const filteredClasses = Array.isArray(classes)
-    ? classes.filter(classItem =>
-      (classItem.course_code?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (classItem.course_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (classItem.lecturer_id?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-    )
+    ? classes.filter((classItem) => {
+        const q = searchTerm.toLowerCase();
+        return (
+          (classItem.course_code || "").toLowerCase().includes(q) ||
+          (classItem.course_title || "").toLowerCase().includes(q) ||
+          (classItem.lecturer_name || "").toLowerCase().includes(q)
+        );
+      })
     : [];
 
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      backgroundColor: "#ffffff",
+      color: "#0f172a",
+      "& fieldset": { borderColor: "#e6edf3" },
+      "&:hover fieldset": { borderColor: "#cbd5e1" },
+      "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+    },
+    input: { color: "#0f172a" },
+  };
+
   return (
-    <div className="bg-[#121212] min-h-screen w-screen">
+    <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
       <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
         <Sidebar />
       </div>
 
       <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
         <div>
-          <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left text-[#fafafa] mb-[0px]">
+          <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
             Manage Classes
           </h2>
           <div className="flex justify-between items-center">
-            <p className="text-[14px] font-inter font-normal leading-[17px] text-left text-[#a1a1aa]">
+            <p className="text-[14px] font-inter font-normal leading-[17px] text-left" style={{ color: "#374151" }}>
               Add, edit, or remove classes from the system
             </p>
-            <Button
-              onClick={() => setOpenAddClassDialog(true)}
-              variant="primary"
-              className="h-[40px] w-[120px] flex items-center justify-center space-x-2 mr-4"
-            >
-              <IoIosAdd className="h-[20px] w-[20px]" />
-              <span>Add Class</span>
-            </Button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Button onClick={() => setOpenAddClassDialog(true)} variant="primary" className="h-[40px]">
+                <IoIosAdd className="h-[20px] w-[20px]" />
+                <span>Add Class</span>
+              </Button>
+            </div>
           </div>
         </div>
 
-        {/* Search */}
-        <div className="flex items-center gap-4 mt-4">
-          <InputField
+        <Box mt={3} mb={2} display="flex" alignItems="center">
+          <TextField
             id="search-classes"
             placeholder="Search classes..."
             value={searchTerm}
             onChange={handleSearchChange}
-            icon={<FaSearch className='text-[#ffffff] w-[16px] h-[16px]' />}
-            iconPosition="left"
-            className="flex-1 h-[40px] pl-10"
+            size="small"
+            fullWidth
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <FaSearch style={{ color: "#64748b", width: 16, height: 16 }} />
+                </InputAdornment>
+              ),
+            }}
+            sx={inputSx}
           />
-        </div>
+        </Box>
 
-        {/* Table */}
-        <div className="border border-[#e5e7eb] rounded-[6px] h-[633px] mt-6">
-          <div className="flex items-center h-[47px] border-b border-[#e5e7eb] px-[17px] bg-[#09090b]">
-            <div className="w-[120px] text-[14px] font-inter font-medium text-[#a1a1aa]">Code</div>
-            <div className="w-[400px] text-[14px] font-inter font-medium text-[#a1a1aa]">Name</div>
-            <div className="w-[230px] text-[14px] font-inter font-medium text-[#a1a1aa]">Lecturer</div>
-            <div className="w-[180px] text-[14px] font-inter font-medium text-[#a1a1aa]">Students</div>
-            <div className="flex-1 text-[14px] font-inter font-medium text-right text-[#a1a1aa]" style={{ paddingRight: '20px' }}>Actions</div>
-          </div>
+        <Card sx={{ mt: 2, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+          <TableContainer component={Paper} sx={{ background: "#ffffff", boxShadow: "none", borderRadius: 0 }}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Code</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Lecturer</TableCell>
+                  <TableCell>Students</TableCell>
+                  <TableCell align="right">Actions</TableCell>
+                </TableRow>
+              </TableHead>
 
-          <div className="overflow-y-auto max-h-[586px]">
-            {fetchError && <p>{fetchError}</p>}
-            {!fetchError && filteredClasses.length === 0 && (
-              <p className="text-center text-[#a1a1aa] mt-4">No classes found</p>
-            )}
-            {filteredClasses.map((classItem) => (
-              <div key={`${classItem.id}-${classItem.type}`} className="flex items-center h-[73px] border-b border-[#27272a] px-[17px] hover:bg-[#27272a] transition-colors">
-                <div className="w-[120px] text-[14px] font-inter font-medium text-[#fafafa]">
-                  {classItem.course_code}
-                </div>
-                <div className="w-[400px] text-[14px] font-inter font-normal text-[#fafafa]">
-                  {classItem.course_title} ({classItem.type})
-                </div>
-                <div className="w-[230px] text-[14px] font-inter font-normal text-[#fafafa]">
-                  {classItem.lecturer_name}
-                </div>
-                <div className="w-[180px] flex items-center text-[14px] font-inter font-normal text-[#fafafa]">
-                  <GoPeople className="mr-1" />
-                  {classItem.num_students || 0}
-                </div>
-                <div className="flex-1 flex justify-end space-x-2">
-                  <button
-                    onClick={() => {
-                      setSelectedClass(classItem);
-                      setOpenEditClassDialog(true);
-                    }}
-                    className="w-[40px] h-[40px] flex items-center justify-center hover:bg-[#09090b] rounded transition-colors border-none"
-                    style={{ background: 'transparent' }}
-                  >
-                    <FiEdit className="text-[#ffffff] w-[20px] h-[20px]" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(classItem)}
-                    className="w-[40px] h-[40px] flex items-center justify-center hover:bg-[#09090b] rounded transition-colors border-none"
-                    style={{ background: 'transparent' }}
-                  >
-                    <RiDeleteBin6Line className="text-[#ffffff] w-[20px] h-[20px]" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+              <TableBody>
+                {fetchError && (
+                  <TableRow>
+                    <TableCell colSpan={5}>{fetchError}</TableCell>
+                  </TableRow>
+                )}
+
+                {!fetchError && filteredClasses.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} sx={{ textAlign: "center", py: 6, color: "text.secondary" }}>
+                      No classes found
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {filteredClasses.map((classItem) => (
+                  <TableRow key={`${classItem.id}-${classItem.type}`}>
+                    <TableCell sx={{ width: 160 }}>
+                      <Typography fontWeight={600}>{classItem.course_code}</Typography>
+                    </TableCell>
+
+                    <TableCell>
+                      <Typography>{classItem.course_title} <Typography component="span" variant="caption" color="text.secondary">({classItem.type})</Typography></Typography>
+                    </TableCell>
+
+                    <TableCell sx={{ width: 240 }}>
+                      <Typography>{classItem.lecturer_name}</Typography>
+                    </TableCell>
+
+                    <TableCell sx={{ width: 140 }}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <GoPeople />
+                        <Typography>{classItem.num_students || 0}</Typography>
+                      </Box>
+                    </TableCell>
+
+                    <TableCell align="right">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setSelectedClass(classItem);
+                          setOpenEditClassDialog(true);
+                        }}
+                      >
+                        <FiEdit />
+                      </IconButton>
+
+                      <IconButton size="small" onClick={() => handleDelete(classItem)}>
+                        <RiDeleteBin6Line />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Card>
       </main>
 
-      <AddClassDialog
-        open={openAddClassDialog}
-        onOpenChange={setOpenAddClassDialog}
-        onClassAdded={fetchClasses}
-      />
+      <AddClassDialog open={openAddClassDialog} onClose={() => setOpenAddClassDialog(false)} onClassAdded={fetchClasses} />
 
-      <EditClassDialog
-        open={openEditClassDialog}
-        onOpenChange={setOpenEditClassDialog}
-        classData={selectedClass}
-        onClassAdded={fetchClasses}
-        lecturers={dummyLecturers}
-      />
+      <EditClassDialog open={openEditClassDialog} onClose={() => setOpenEditClassDialog(false)} classData={selectedClass} onClassAdded={fetchClasses} />
     </div>
   );
 };

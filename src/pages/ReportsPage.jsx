@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useState } from "react";
 import {
   Box,
   Typography,
@@ -7,23 +7,22 @@ import {
   Card,
   CardContent,
   CardHeader,
-  Divider,
-} from "@mui/material"
-import Sidebar from "../components/Sidebar"
-import AttendanceReportsTab from "../components/AttendanceReportsTab"
-import AbsenceReportsTab from "../components/AbsenceReportsTab"
-import FraudReportsTab from "../components/FraudReportsTab"
-import ReportGenerator from "../components/Event/ReportGenerator"
+} from "@mui/material";
+import Sidebar from "../components/Sidebar";
+import AttendanceReportsTab from "../components/AttendanceReportsTab";
+import AbsenceReportsTab from "../components/AbsenceReportsTab";
+import FraudReportsTab from "../components/FraudReportsTab";
+import ReportGenerator from "../components/Event/ReportGenerator";
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState(0)
+  const [activeTab, setActiveTab] = useState(0);
 
   const handleTabChange = (_e, newValue) => {
-    setActiveTab(newValue)
-  }
+    setActiveTab(newValue);
+  };
 
   return (
-    <div className="bg-[#121212] min-h-screen w-screen">
+    <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
       <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
         <Sidebar />
       </div>
@@ -32,62 +31,91 @@ export default function ReportsPage() {
         className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
         style={{ minHeight: "100vh" }}
       >
-        {/* Page Header */}
-        <Typography variant="h5" color="#fafafa" fontWeight="bold">
-          Reports
-        </Typography>
+        <div>
+          <h2
+            className="text-[24px] font-inter font-semibold leading-[30px] text-left"
+            style={{ color: "#0f172a", marginBottom: 0 }}
+          >
+            Reports
+          </h2>
+          <div className="flex justify-between items-center">
+            <p
+              className="text-[14px] font-inter font-normal leading-[17px] text-left"
+              style={{ color: "#374151" }}
+            >
+              View and generate various reports related to attendance, absences, and fraud detection.
+            </p>
+          </div>
+        </div>
 
-        {/* Intro Card */}
-        <Card
-          sx={{
-            backgroundColor: "#09090b",
-            color: "#fafafa",
-            mt: 3,
-            borderRadius: 2,
-            border: 1,
-          }}
-        >
-          <CardHeader style={{ paddingBottom: "0px" }}
-            title={
-              <Typography variant="h6" fontWeight="bold">
-                Reporting Module
-              </Typography>
-            }
-            subheader={
-              <Typography variant="body2" color="#a1a1aa">
-                View and generate various reports related to attendance,
-                absences, and fraud detection.
-              </Typography>
-            }
-          />
-        
-
-        {/* Tabs and Content */}
-        <Box sx={{ m: "10px"}}>
+        <Box sx={{ borderBottom: 1, borderColor: "#e5e7eb"}}>
           <Tabs
             value={activeTab}
             onChange={handleTabChange}
             textColor="primary"
             indicatorColor="primary"
+            sx={{ mb: 2 }}
           >
-            <Tab label="Attendance Reports" />
-            <Tab label="Absence Reports" />
-            <Tab label="Fraud Reports" />
+            <Tab label="Attendance Reports" sx={{ color: "#0f172a" }} />
+            <Tab label="Absence Reports" sx={{ color: "#0f172a" }} />
+            <Tab label="Fraud Reports" sx={{ color: "#0f172a" }} />
           </Tabs>
-
-          <Box sx={{ m: "10px", border: 1, borderRadius: 1 }}>
-            {activeTab === 0 && <AttendanceReportsTab />}
-            {activeTab === 1 && <AbsenceReportsTab />}
-            {activeTab === 2 && <FraudReportsTab />}
-          </Box>
         </Box>
-        </Card>
 
-        {/* Generator Section */}
+        <Box mt={2}>
+          {activeTab === 0 && (
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+              <CardHeader
+                sx={{ pb: 0 }}
+                title={<Typography variant="h6" fontWeight="bold" color="text.primary">Attendance Reports</Typography>}
+                subheader={<Typography variant="body2" color="text.secondary">Generate and view attendance summaries and trends.</Typography>}
+              />
+              <CardContent>
+                <AttendanceReportsTab />
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === 1 && (
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+              <CardHeader
+                sx={{ pb: 0 }}
+                title={<Typography variant="h6" fontWeight="bold" color="text.primary">Absence Reports</Typography>}
+                subheader={<Typography variant="body2" color="text.secondary">View absence statistics, MC submissions and leave trends.</Typography>}
+              />
+              <CardContent>
+                <AbsenceReportsTab />
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === 2 && (
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+              <CardHeader
+                sx={{ pb: 0 }}
+                title={<Typography variant="h6" fontWeight="bold" color="text.primary">Fraud Reports</Typography>}
+                subheader={<Typography variant="body2" color="text.secondary">Investigate potential fraud and suspicious activity.</Typography>}
+              />
+              <CardContent>
+                <FraudReportsTab />
+              </CardContent>
+            </Card>
+          )}
+        </Box>
+
         <Box mt={4}>
-          <ReportGenerator />
+          <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+            <CardHeader
+              sx={{ pb: 0 }}
+              title={<Typography variant="h6" fontWeight="bold" color="text.primary">Report Generator</Typography>}
+              subheader={<Typography variant="body2" color="text.secondary">Create custom reports for download or email.</Typography>}
+            />
+            <CardContent>
+              <ReportGenerator />
+            </CardContent>
+          </Card>
         </Box>
       </main>
     </div>
-  )
+  );
 }

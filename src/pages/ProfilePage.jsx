@@ -1,6 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Avatar,
   Button,
   Card,
   CardContent,
@@ -15,47 +14,87 @@ import {
   DialogContentText,
   DialogActions,
 } from "@mui/material";
-import EditIcon from "@mui/icons-material/Edit";
 import LogoutIcon from "@mui/icons-material/Logout";
 import Sidebar from "../components/Sidebar";
 import { useNavigate } from "react-router-dom";
+import supabase from "../config/supabaseClient";
 
-const ProfilePage = () => {
+export default function ProfilePage() {
   const [openLogout, setOpenLogout] = useState(false);
   const navigate = useNavigate();
-  const user = JSON.parse(sessionStorage.getItem("user")) || {};
-  const userName = user.name || "Charlie Tan"; 
-  const userRole = user.role === "administrator" ? "Administrator" : "Lecturer";
+  const [user, setUser] = useState(null);
+
+  const userId = JSON.parse(sessionStorage.getItem("user"))?.id;
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data, error } = await supabase
+        .from("users")
+        .select("*")
+        .eq("id", userId)
+        .single();
+      if (error) {
+        console.error("Error fetching user:", error);
+        setUser(null);
+      } else {
+        setUser(data);
+      }
+    };
+    if (userId) fetchUser();
+  }, [userId]);
+
+  if (!user) return <Typography>Loading...</Typography>;
 
   const handleLogout = () => setOpenLogout(true);
   const handleLogoutCancel = () => setOpenLogout(false);
   const handleLogoutConfirm = () => {
     setOpenLogout(false);
-    navigate("/"); // Redirect to login page
+    sessionStorage.clear();
+    navigate("/");
+  };
+
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      backgroundColor: "#ffffff",
+      "& fieldset": { borderColor: "#e2e8f0" },
+      "&:hover fieldset": { borderColor: "#cbd5e1" },
+      "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+    },
+    "& .MuiInputLabel-root": { color: "#64748b" },
+    "& .MuiInputLabel-root.Mui-focused": { color: "#0f172a" },
+    input: { color: "#0f172a" },
   };
 
   return (
-    <div className="bg-[#121212] min-h-screen w-screen">
+    <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
       <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
         <Sidebar />
       </div>
-      <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
-        {/* Section Header */}
+
+      <main
+        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh" }}
+      >
         <div>
-          <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left text-[#fafafa] mb-[0px]">
+          <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
             My Profile
           </h2>
           <div className="flex justify-between items-center">
-            <p className="text-[14px] font-inter font-normal leading-[17px] text-left text-[#a1a1aa]">
-              View and update your personal information
+            <p className="text-[14px] font-inter font-normal leading-[17px] text-left" style={{ color: "#374151" }}>
+              View and manage your personal information
             </p>
             <Box display="flex" gap={2}>
               <Button
                 variant="outlined"
-                color="error"
                 startIcon={<LogoutIcon />}
                 onClick={handleLogout}
                 className="h-[40px] flex items-center justify-center space-x-2"
+                sx={{
+                  borderColor: "#ef4444",
+                  color: "#ef4444",
+                  background: "transparent",
+                  "&:hover": { backgroundColor: "rgba(239,68,68,0.04)" },
+                }}
               >
                 Logout
               </Button>
@@ -63,85 +102,84 @@ const ProfilePage = () => {
           </div>
         </div>
 
-        {/* Profile Card Section */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-[10px]">
-          {/* Left: Profile Summary */}
-          <Card className="border" style={{ background: "#09090b", color: "#fafafa" }}>
+          <Card
+            sx={{
+              background: "#f8fafc",
+              color: "#0f172a",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 6px 18px rgba(15, 23, 42, 0.04)",
+            }}
+          >
             <CardContent>
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center py-6">
                 <Typography variant="h5" fontWeight="bold" gutterBottom>
-                  {userName}
+                  {user.name}
                 </Typography>
-                <Typography variant="body2" color="#a1a1aa">
-                  {userRole}
+                <Typography variant="body2" sx={{ color: "#475569" }}>
+                  {user.role === "admin"
+                    ? "Administrator"
+                    : user.role === "lecturer"
+                    ? "Lecturer"
+                    : user.role || ""}
                 </Typography>
               </div>
             </CardContent>
           </Card>
 
-          {/* Profile Details */}
-          <Card className="border" style={{ background: "#09090b", color: "#fafafa", marginTop: "20px" }}>
+          <Card
+            sx={{
+              background: "#ffffff",
+              color: "#0f172a",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 6px 18px rgba(15, 23, 42, 0.04)",
+            }}
+          >
             <CardContent>
               <Typography variant="h6" fontWeight="bold" gutterBottom>
                 Personal Details
               </Typography>
-              <Divider sx={{ marginBottom: "20px", background: "#27272a" }} />
+              <Divider sx={{ marginBottom: "20px" }} />
               <Grid container spacing={2}>
                 <Grid item xs={12}>
                   <TextField
                     disabled
                     fullWidth
                     label="Name"
-                    value={userName}
+                    value={user.name}
                     variant="outlined"
-                    InputProps={{
-                      readOnly: true,
-                      sx: { color: "#fafafa" },
-                    }}
-                    sx={{
-                      marginBottom: "5px",
-                      backgroundColor: "#18181b",
-                      input: { color: "#fafafa" },
-                      label: { color: "#a1a1aa" },
-                    }}
+                    InputProps={{ readOnly: true }}
+                    sx={{ ...inputSx, marginBottom: "5px" }}
                   />
                 </Grid>
+
                 <Grid item xs={12}>
                   <TextField
                     disabled
                     fullWidth
                     label="Email"
-                    value="admin@example.com"
+                    value={user.email}
                     variant="outlined"
-                    InputProps={{
-                      readOnly: true,
-                      sx: { color: "#fafafa" },
-                    }}
-                    sx={{
-                      marginBottom: "5px",
-                      backgroundColor: "#18181b",
-                      input: { color: "#fafafa" },
-                      label: { color: "#a1a1aa" },
-                    }}
+                    InputProps={{ readOnly: true }}
+                    sx={{ ...inputSx, marginBottom: "5px" }}
                   />
                 </Grid>
+
                 <Grid item xs={12}>
                   <TextField
                     disabled
                     fullWidth
                     label="Role"
-                    value="Administrator"
+                    value={
+                      user.role === "admin"
+                        ? "Administrator"
+                        : user.role === "lecturer"
+                        ? "Lecturer"
+                        : user.role || ""
+                    }
                     variant="outlined"
-                    InputProps={{
-                      readOnly: true,
-                      sx: { color: "#fafafa" },
-                    }}
-                    sx={{
-                      marginBottom: "5px",
-                      backgroundColor: "#18181b",
-                      input: { color: "#fafafa" },
-                      label: { color: "#a1a1aa" },
-                    }}
+                    InputProps={{ readOnly: true }}
+                    sx={{ ...inputSx, marginBottom: "5px" }}
                   />
                 </Grid>
               </Grid>
@@ -149,7 +187,6 @@ const ProfilePage = () => {
           </Card>
         </div>
 
-        {/* Logout Confirmation Dialog */}
         <Dialog open={openLogout} onClose={handleLogoutCancel}>
           <DialogTitle>Confirm Logout</DialogTitle>
           <DialogContent>
@@ -169,6 +206,4 @@ const ProfilePage = () => {
       </main>
     </div>
   );
-};
-
-export default ProfilePage;
+}

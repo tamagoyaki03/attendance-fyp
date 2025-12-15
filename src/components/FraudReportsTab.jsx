@@ -1,4 +1,4 @@
-import React from "react"
+import React from "react";
 import {
   Card,
   CardContent,
@@ -16,16 +16,16 @@ import {
   Alert,
   Box,
   Paper,
-} from "@mui/material"
-import MailIcon from "@mui/icons-material/Mail"
-import EditIcon from "@mui/icons-material/Edit"
+} from "@mui/material";
+import MailIcon from "@mui/icons-material/Mail";
+import EditIcon from "@mui/icons-material/Edit";
 
 export default function FraudReportsTab() {
-  const [snackbar, setSnackbar] = React.useState({ open: false, message: "", severity: "success" })
+  const [snackbar, setSnackbar] = React.useState({ open: false, message: "", severity: "success" });
 
   const handleUpdateAttendance = (name) => {
-    setSnackbar({ open: true, message: `Simulated attendance update for ${name}.`, severity: "success" })
-  }
+    setSnackbar({ open: true, message: `Simulated attendance update for ${name}.`, severity: "success" });
+  };
 
   const fraudData = [
     {
@@ -52,14 +52,15 @@ export default function FraudReportsTab() {
       timestamp: "2025-06-12 11:00 AM",
       status: "Flagged",
     },
-  ]
+  ];
 
   return (
     <>
-      <Card sx={{background:"#09090b"}}>
+      <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
         <CardHeader
-          title={<Typography variant="h6" fontWeight="bold">Fraud Detections</Typography>}
-          subheader="List of suspicious attendance records."
+          sx={{ pb: 0 }}
+          title={<Typography variant="h6" fontWeight="bold" color="text.primary">Fraud Detections</Typography>}
+          subheader={<Typography variant="body2" color="text.secondary">List of suspicious attendance records.</Typography>}
         />
         <CardContent>
           <TableContainer component={Paper} sx={{ boxShadow: "none" }}>
@@ -91,10 +92,16 @@ export default function FraudReportsTab() {
                     <TableCell align="right">
                       <Box display="flex" justifyContent="flex-end" gap={1}>
                         <Button
-                          variant="outlined"
+                          variant="contained"
                           size="small"
                           startIcon={<EditIcon />}
                           onClick={() => handleUpdateAttendance(row.studentName)}
+                          sx={{
+                            backgroundColor: "#ffffff",
+                            color: "#0f172a",
+                            textTransform: "none",
+                            "&:hover": { backgroundColor: "#f3f4f6" },
+                          }}
                         >
                           Update
                         </Button>
@@ -122,5 +129,5 @@ export default function FraudReportsTab() {
         </Alert>
       </Snackbar>
     </>
-  )
+  );
 }

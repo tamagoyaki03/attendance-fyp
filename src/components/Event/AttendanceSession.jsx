@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef} from "react";
-import {QRCodeSVG} from "qrcode.react";
-// import QRGenerator from "../Event/QRGenerator";
+import React, { useState, useEffect, useRef } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +9,8 @@ import {
   Chip,
   Box,
   Typography,
+  FormControlLabel,
+  Checkbox,
 } from "@mui/material";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import QrCodeIcon from "@mui/icons-material/QrCode";
@@ -17,15 +18,20 @@ import LocationOnIcon from "@mui/icons-material/LocationOn";
 import Button from "../Button";
 import supabase from "../../config/supabaseClient";
 
-async function saveSessionPassword(type, id, password) {
-    // Choose table based on type
-    // const table = type === "course" ? "course_lecture" : "course_tutorial";
-    // Update the password field for the given id
+async function saveSessionPassword(sessionId, password) {
+  if (sessionId && password) {
     await supabase
       .from("attendance_session")
-      .update({ password })
-      .eq("id", id);
+      .update({ attendance_password: password })
+      .eq("id", sessionId);
   }
+}
+
+const formatTime = (seconds) => {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+};
 
 export default function AttendanceSession({
   open,
@@ -33,96 +39,84 @@ export default function AttendanceSession({
   sessionType,
   classData,
   onFinalize,
-  onExpire, 
+  onExpire,
   sessionPassword,
+  sessionId,
+  requireQrToEnd,
+  setRequireQrToEnd,
 }) {
-  const [qrValue, setQrValue] = useState("")
+  const [qrValue, setQrValue] = useState("");
   const [countdown, setCountdown] = useState(300);
   const [isExpired, setIsExpired] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [location, setLocation] = useState(null);
   const creatingSession = useRef(false);
 
-  useEffect(() => {
-    if (open && classData?.id) {
-      const fetchLatestClassData = async () => {
-        // Determine table based on type
-        const table = classData.type === "Lecture" ? "course_lecture" : "course_tutorial";
-        const { data, error } = await supabase
-          .from(table)
-          .select("course_code, course_title")
-          .eq("id", classData.id)
-          .single();
-        if (data) {
-          setLatestClassInfo({
-            code: data.course_code,
-            name: data.course_title,
-          });
-        }
-      };
-      fetchLatestClassData();
-    }
-  }, [open, classData]);
-
   // Generate a QR code when the dialog opens
   useEffect(() => {
     if (
       open &&
       sessionType === "start" &&
-      location &&
       classData &&
       sessionPassword &&
+      sessionId &&
       !creatingSession.current
     ) {
-      const saved = localStorage.getItem("attendanceSession");
-      if (saved) {
-        const session = JSON.parse(saved);
-        // If session is still valid, do not create a new one
-        if (
-          session.classId === classData.id &&
-          Date.now() - session.startTime < 300 * 1000 // 5 minutes
-        ) {
-          return;
-        }
-      }
-      creatingSession.current = true; 
+      creatingSession.current = true;
       (async () => {
-        const qrString = `${classData.type}|${classData.id}|${sessionPassword}`; //change qr type
-        setQrValue(qrString);
-        setCountdown(300);
-        setIsExpired(false);
+        try {
+          // Determine type from classData
+          let type = "lecture"; // default fallback
+          
+          if (classData?.type) {
+            type = classData.type.toLowerCase() === "lecture" ? "lecture" : "tutorial";
+          } else if (classData?.id) {
+            try {
+              const { data: lectureData, error: lectureError } = await supabase
+                .from("course_lecture")
+                .select("id")
+                .eq("id", classData.id)
+                .single();
+              
+              if (lectureData && !lectureError) {
+                type = "lecture";
+              } else {
+                const { data: tutorialData, error: tutorialError } = await supabase
+                  .from("course_tutorial")
+                  .select("id")
+                  .eq("id", classData.id)
+                  .single();
+                
+                if (tutorialData && !tutorialError) {
+                  type = "tutorial";
+                }
+              }
+            } catch (error) {
+              console.warn("Could not determine class type, defaulting to lecture:", error);
+            }
+          }
+          
+          const qrString = `${type}|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
+          console.log("Generating QR with string:", qrString);
+          setQrValue(qrString);
+          setCountdown(300);
+          setIsExpired(false);
 
-        saveSessionPassword(classData.type, classData.id, sessionPassword);
-        // await createAttendanceSession(classData.id, classData.type, location, specialPassword);
-
-        // Save session to localStorage
-        const sessionData = {
-          classId: classData.id,
-          type: classData.type,
-          qrValue: qrString,
-          countdown: 300,
-          startTime: Date.now(),
-          sessionPassword,
-          location,
-        };
-        localStorage.setItem("attendanceSession", JSON.stringify(sessionData));
+          if (sessionId && sessionPassword) {
+            await saveSessionPassword(sessionId, sessionPassword);
+          }
+        } catch (error) {
+          console.error("Error generating QR code:", error);
+          const fallbackQrString = `lecture|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
+          setQrValue(fallbackQrString);
+        } finally {
+          creatingSession.current = false;
+        }
       })();
     }
-  }, [open, sessionType, location, classData, sessionPassword]);
+  }, [open, sessionType, classData, sessionPassword, sessionId]);
 
-  const [latestClassInfo, setLatestClassInfo] = useState({
-    code: classData?.code || "",
-    name: classData?.name || "",
-  });
-
-
-  useEffect(() => {
-  if (classData) {
-    console.log("classData:", classData);
-  }
-}, [classData]);
-
-// Get current location when dialog opens
+  // Get current location when dialog opens
   useEffect(() => {
     if (open) {
       navigator.geolocation.getCurrentPosition(
@@ -132,204 +126,125 @@ export default function AttendanceSession({
             lng: pos.coords.longitude,
           });
         },
-        () => {
-          setLocation(null);
+        (error) => {
+          console.warn("Could not get location:", error);
+          setLocation({ lat: 0, lng: 0 }); // Set default so QR still generates
         }
       );
       setCurrentTime(new Date());
     }
   }, [open]);
 
-  // Countdown timer
-  useEffect(() => {
-    if (!open || isExpired) return;
+  // ... rest of useEffects ...
 
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setIsExpired(true);
-          if (onExpire) onExpire(); // <-- notify parent
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [open, sessionType, location, classData]);
-
-  useEffect(() => {
-  if (open && sessionType === "start" && classData) {
-    const saved = localStorage.getItem("attendanceSession");
-    if (saved) {
-      const session = JSON.parse(saved);
-      if (
-        session.classId === classData.id &&
-        Date.now() - session.startTime < 300 * 1000 // 5 minutes
-      ) {
-        setQrValue(session.qrValue);
-        setCountdown(300 - Math.floor((Date.now() - session.startTime) / 1000));
-        setIsExpired(false);
-        setLocation(session.location);
-      } else {
-        localStorage.removeItem("attendanceSession");
-      }
-    }
+  // Update the render condition - remove location requirement
+  if (!open || !classData || !qrValue) {
+    return null;
   }
-}, [open, sessionType, classData]);
-
-useEffect(() => {
-  if (!open) {
-    creatingSession.current = false;
-  }
-}, [open]);
-
-  useEffect(() => {
-  if (qrValue) {
-    console.log("UPDATED QR VALUE:", qrValue);
-  }
-}, [qrValue]);
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  if (!open || !classData || !location || typeof location.lat !== "number" || typeof location.lng !== "number") {
-  return null;
-}
 
   return (
-    <Dialog open={open} onClose={() => onOpenChange(false)} maxWidth="sm" 
+    <Dialog
+      open={open}
+      onClose={() => onOpenChange(false)}
+      maxWidth="sm"
       PaperProps={{
         sx: {
-          background: "#09090b",
-          color: "#fff",
+          background: "#ffffff",
+          color: "text.primary",
           borderRadius: 2,
-          border: "1px solid #ffffff",
-          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.2)",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
         },
-      }}>
-      <DialogTitle style={{paddingBottom: 0}}>
+      }}
+    >
+      <DialogTitle>
         {sessionType === "start" ? "Start Attendance Session" : "End Attendance Session"}
       </DialogTitle>
+
       <DialogContent>
-        <DialogContentText>
+        <DialogContentText sx={{ mb: 2 }}>
           {sessionType === "start"
             ? "Display this QR code for students to scan and check in."
             : "Display this QR code for students to scan and check out."}
         </DialogContentText>
-        <Box display="flex" flexDirection="column" alignItems="center" py={4}>
+
+        <Box display="flex" flexDirection="column" alignItems="center" py={2}>
           <Box position="relative">
             {isExpired ? (
-              <Box
-                display="flex"
-                flexDirection="column"
-                alignItems="center"
-                justifyContent="center"
-                height={300}
-                width={300}
-                border={1}
-                borderRadius={2}
-                borderStyle="dashed"
-                borderColor="grey.400"
-              >
+              <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height={300} width={300} borderRadius={2} border="1px dashed" borderColor="grey.300">
                 <QrCodeIcon sx={{ fontSize: 64, color: "text.secondary", mb: 2 }} />
-                <Typography color="" align="center">
-                  QR Code expired
-                </Typography>
-                {/* <Button onClick={handleRefreshQR} variant="outlined" sx={{ mt: 2 }}>
-                  Generate New QR Code
-                </Button> */}
+                <Typography align="center">QR Code expired</Typography>
               </Box>
             ) : (
               <>
-                <Box
-                  overflow="hidden"
-                  border={1}
-                  borderRadius={2}
-                  borderColor="grey.400"
-                  mb={2}
-                >
-                  {qrValue && (
-                    <QRCodeSVG
-                      value={qrValue}
-                      size={300}
-                      bgColor="#fff"
-                      fgColor="#000"
-                      level="H"
-                      includeMargin={false}
+                <Box border={1} borderRadius={2} borderColor="grey.300" mb={2} overflow="hidden">
+                  {qrValue ? (
+                    <QRCodeSVG 
+                      value={qrValue} 
+                      size={300} 
+                      bgColor="#ffffff" 
+                      fgColor="#000000" 
+                      level="H" 
+                      includeMargin={false} 
                     />
-                    // <QRGenerator></QRGenerator>
+                  ) : (
+                    <Box display="flex" alignItems="center" justifyContent="center" height={300} width={300}>
+                      <Typography color="text.secondary">Generating QR code...</Typography>
+                    </Box>
                   )}
                 </Box>
                 <Chip
-                  label={
-                    <Box display="flex" alignItems="center">
-                      <AccessTimeIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                      Expires in {formatTime(countdown)}
-                    </Box>
-                  }
+                  label={<Box display="flex" alignItems="center"><AccessTimeIcon sx={{ fontSize: 16, mr: 0.5 }} />Expires in {formatTime(countdown)}</Box>}
                   color={countdown < 60 ? "error" : "success"}
-                  sx={{
-                    position: "absolute",
-                    top: -16,
-                    right: 0,
-                  }}
+                  sx={{ position: "absolute", top: -12, right: 0 }}
                 />
               </>
             )}
           </Box>
+
           <Box width="100%" mt={3}>
             <Box display="flex" justifyContent="space-between" mb={1}>
-                <Typography color="text.secondary">Class:</Typography>
-                <Typography>
-                    {classData?.course_code || "Unknown"} {classData?.course_title || "Unknown"}
-                </Typography>
+              <Typography color="text.secondary">Class:</Typography>
+              <Typography>{classData?.course_code || "Unknown"} {classData?.course_title || ""}</Typography>
             </Box>
 
             <Box display="flex" justifyContent="space-between" mb={1}>
               <Typography color="text.secondary">Session Type:</Typography>
-              <Chip
-                label={sessionType === "start" ? "Check-in" : "Check-out"}
-                variant="outlined"
-                color={sessionType === "start" ? "success" : "warning"}
-                sx={{ fontWeight: "bold" }}
-              />
+              <Chip label={sessionType === "start" ? "Check-in" : "Check-out"} variant="outlined" color={sessionType === "start" ? "success" : "warning"} />
             </Box>
-            <Box display="flex" justifyContent="space-between" mb={1}>
-              <Typography color="text.secondary">Location:</Typography>
-              <Box display="flex" alignItems="center">
-                <LocationOnIcon sx={{ fontSize: 16, mr: 0.5, color: "text.secondary" }} />
-                <Typography variant="caption">
-                {location && typeof location.lat === "number" && typeof location.lng === "number"
-                    ? `${Number(location.lat).toFixed(6)}, ${Number(location.lng).toFixed(6)}`
-                    : "Unknown"}
-                </Typography>
+
+            {location && (
+              <Box display="flex" justifyContent="space-between" mb={1}>
+                <Typography color="text.secondary">Location:</Typography>
+                <Box display="flex" alignItems="center">
+                  <LocationOnIcon sx={{ fontSize: 16, mr: 0.5, color: "text.secondary" }} />
+                  <Typography variant="caption">{`${Number(location.lat).toFixed(6)}, ${Number(location.lng).toFixed(6)}`}</Typography>
+                </Box>
               </Box>
-            </Box>
+            )}
+
             <Box display="flex" justifyContent="space-between">
-                <Typography color="text.secondary">Time:</Typography>
-                <Typography>
-                {currentTime ? currentTime.toLocaleTimeString() : "Unknown"}
-                </Typography>
+              <Typography color="text.secondary">Time:</Typography>
+              <Typography>{currentTime ? currentTime.toLocaleTimeString() : "Unknown"}</Typography>
             </Box>
           </Box>
         </Box>
-      </DialogContent>
-      <DialogActions>
-        {sessionType === "start" ? (
-            <Button onClick={() => onOpenChange(false)} variant="contained" color="primary">
-            Continue Session
-            </Button>
-        ) : (
-            <Button onClick={onFinalize} variant="contained" color="primary">
-            Finalize Session
-            </Button>
+
+        {sessionType === "start" && (
+          <FormControlLabel
+            control={<Checkbox checked={requireQrToEnd} onChange={(e) => setRequireQrToEnd(e.target.checked)} />}
+            label="Require QR code to end attendance session"
+          />
         )}
-    </DialogActions>
+      </DialogContent>
+
+      <DialogActions sx={{ px: 3, py: 2 }}>
+        {sessionType === "start" ? (
+          <Button onClick={() => onOpenChange(false)} variant="contained">Continue Session</Button>
+        ) : (
+          <Button onClick={onFinalize} variant="contained">Finalize Session</Button>
+        )}
+      </DialogActions>
     </Dialog>
   );
 }

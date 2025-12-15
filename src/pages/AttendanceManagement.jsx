@@ -1,32 +1,29 @@
 import React, { useState, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom";
-import { Card, CardContent, Typography, Chip } from "@mui/material";
+import { Card, CardContent, Typography, Chip, TextField, InputAdornment } from "@mui/material";
 import { v4 as uuidv4 } from "uuid"; 
 import Box from "@mui/material/Box";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
 import Snackbar from "@mui/material/Snackbar";
 import MuiAlert from "@mui/material/Alert";
-import AccessTimeIcon from "@mui/icons-material/AccessTime";
-import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import DownloadIcon from "@mui/icons-material/Download";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import QrCodeIcon from "@mui/icons-material/QrCode";
 import AutorenewIcon from "@mui/icons-material/Autorenew";
-import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
-import PersonRemoveIcon from "@mui/icons-material/PersonRemove";
 import GroupIcon from "@mui/icons-material/Group";
-import ErrorIcon from "@mui/icons-material/Error";
 import { FaSearch } from "react-icons/fa";
 import AttendanceSession from "../components/Event/AttendanceSession";
 import StudentAttendanceList from "../components/StudentAttendanceList";
 import StudentDetailsCard  from "../components/StudentDetailsCard"
 import Sidebar from "../components/Sidebar";
-import InputField from "../components/InputField";
 import supabase from "../config/supabaseClient";
 import AttendanceStats  from "../components/AttendanceStats"
 import Button from "../components/Button";
 import FlaggedAttendanceList from "../components/FlaggedAttendanceList"
+import AttendanceIssues from "../components/Event/AttendanceIssues";
+import ChooseModeDialog from "./Dialogs/chooseModeDialog";
+import OnlineAttendanceDialog from "./Dialogs/onlineAttendanceDialog";
 
 const DAY_NUMBER_TO_NAME = {
   1: "Monday",
@@ -61,11 +58,56 @@ export default function AttendanceManagementPage() {
   const [now, setNow] = useState(Date.now());
   const [classAttendance, setClassAttendance] = useState(null);
   const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
+  const [userRole, setUserRole] = useState("");
+  const [userName, setUserName] = useState("");
   const user = JSON.parse(sessionStorage.getItem("user")) || {};
-  const userRole = user.role || "Lecturer";
-  const userName = user.name || "Charlie Tan";
   const [enrolledStudents, setEnrolledStudents] = useState([]);
   const [currentSessionPassword, setCurrentSessionPassword] = useState(null);
+
+  const [chooseModeDialogOpen, setChooseModeDialogOpen] = useState(false);
+  const [onlineDialogOpen, setOnlineDialogOpen] = useState(false);
+  const [attendanceMode, setAttendanceMode] = useState(null); // "Online" or "Physical" 
+  const [requireQrToEnd, setRequireQrToEnd] = useState(false);
+  const [attendanceAdded, setAttendanceAdded] = useState(false);
+
+  const handleOnlineProceed = async ({ recordingLink, quizContent }) => {
+  setOnlineDialogOpen(false);
+  setIsLoading(true);
+
+  // Save attendance session WITHOUT QR code
+  try {
+    const { data, error } = await supabase
+      .from('attendance_session')
+      .insert([{
+        course_lecture_id: selectedClass.id,
+        latitude: null,
+        longitude: null,
+        recording_url: recordingLink,
+        quiz_questions: quizContent
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    setCurrentAttendanceId(data.id);
+    setClassAttendance(data);
+    setSnackbar({
+      open: true,
+      message: "Online attendance session started.",
+      severity: "success",
+    });
+    // Do NOT open QR dialog for online mode
+  } catch (error) {
+    setSnackbar({
+      open: true,
+      message: "Failed to start online session.",
+      severity: "error",
+    });
+  } finally {
+    setIsLoading(false);
+    setCurrentAttendanceId(data.id);
+  }
+};
 
   useEffect(() => {
     if (!sessionActive) return;
@@ -73,89 +115,148 @@ export default function AttendanceManagementPage() {
     return () => clearInterval(interval);
   }, [sessionActive]);
 
-  // Fetch from course_lecture instead of classes
+  useEffect(() => {
+    const fetchUserInfo = async () => {
+      if (!user.id) return;
+      const { data, error } = await supabase
+        .from("users")
+        .select("name, role")
+        .eq("id", user.id)
+        .single();
+      if (!error && data) {
+        setUserRole(data.role);
+        setUserName(data.name);
+      }
+    };
+    fetchUserInfo();
+  }, [user.id]);
+
   useEffect(() => {
   const fetchClasses = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase.from('course_lecture').select('*');
-    if (error) {
-      setFetchError('Could not fetch classes');
-      setClasses([]);
-    } else {
-      // Filter classes for lecturer: only show classes where lecturer matches userName
-      let filtered = data || [];
-      if (userRole !== "Administrator") {
-        filtered = filtered.filter(cls => cls.lecturer_id === user.id);
+    try {
+      // Fetch both lectures and tutorials
+      const [lectureRes, tutorialRes] = await Promise.all([
+        supabase.from('course_lecture').select('*'),
+        supabase.from('course_tutorial').select('*')
+      ]);
+
+      if (lectureRes.error) throw lectureRes.error;
+      if (tutorialRes.error) throw tutorialRes.error;
+
+      // Combine both datasets
+      const lectures = (lectureRes.data || []).map(cls => ({ ...cls, type: "Lecture" }));
+      const tutorials = (tutorialRes.data || []).map(cls => ({ ...cls, type: "Tutorial" }));
+      let combined = [...lectures, ...tutorials];
+
+      // Filter classes for lecturer: only show classes where lecturer matches
+      if (userRole !== "admin") {
+        combined = combined.filter(cls => cls.lecturer_id === user.id);
       }
-      // Calculate duration in minutes for each class and convert day_of_week
-      const classesWithDuration = filtered.map(cls => {
-        // Convert day_of_week number to string
+
+      // Calculate duration and normalize day_of_week
+      const classesWithDuration = combined.map(cls => {
         let dayOfWeekStr = cls.day_of_week;
         if (typeof dayOfWeekStr === "number" && DAY_NUMBER_TO_NAME[dayOfWeekStr]) {
           dayOfWeekStr = DAY_NUMBER_TO_NAME[dayOfWeekStr];
         }
-        if (cls.lecture_start_time && cls.lecture_end_time) {
-          const [sh, sm] = cls.lecture_start_time.split(':').map(Number);
-          const [eh, em] = cls.lecture_end_time.split(':').map(Number);
+
+        const startTime = cls.type === "Lecture" ? cls.lecture_start_time : cls.tutorial_start_time;
+        const endTime = cls.type === "Lecture" ? cls.lecture_end_time : cls.tutorial_end_time;
+        const startDate = cls.type === "Lecture" ? cls.lecture_start_date : cls.tutorial_start_date;
+        const endDate = cls.type === "Lecture" ? cls.lecture_end_date : cls.tutorial_end_date;
+        const location = cls.type === "Lecture" ? cls.lecture_location : cls.tutorial_location;
+
+        if (startTime && endTime) {
+          const [sh, sm] = startTime.split(':').map(Number);
+          const [eh, em] = endTime.split(':').map(Number);
           const start = sh * 60 + sm;
           const end = eh * 60 + em;
           let duration = end - start;
           if (duration < 0) duration += 24 * 60;
-          return { ...cls, duration, day_of_week: dayOfWeekStr };
+            return { ...cls, duration, day_of_week: dayOfWeekStr, startTime, endTime, startDate, endDate, location };
         }
-        return { ...cls, duration: 0, day_of_week: dayOfWeekStr };
+        return { ...cls, duration: 0, day_of_week: dayOfWeekStr, startTime, endTime, startDate, endDate, location };
       });
+
       setClasses(classesWithDuration);
       setFetchError(null);
+    } catch (error) {
+      console.error("Error fetching classes:", error);
+      setFetchError('Could not fetch classes');
+      setClasses([]);
     }
     setIsLoading(false);
   };
   fetchClasses();
-}, [userRole, userName, user.id]);
+}, [userRole, user.id]);
 
 const [presentCount, setPresentCount] = useState(0);
 const [absentCount, setAbsentCount] = useState(0);
 
 useEffect(() => {
-  if (!currentAttendanceId) return;
-  let intervalId;
-  const fetchCounts = async () => {
-    // Get all enrollments for this class
-    const { data: session, error: sessionError } = await supabase
-      .from("attendance_session")
-      .select("id, course_lecture_id")
-      .eq("id", currentAttendanceId)
-      .single();
-    if (sessionError || !session) return;
+    if (!currentAttendanceId || !selectedClass?.id) return;
+    
+    let intervalId;
+    const fetchCounts = async () => {
+      try {
+        const { data: session, error: sessionError } = await supabase
+          .from("attendance_session")
+          .select("id, course_lecture_id, course_tutorial_id")
+          .eq("id", currentAttendanceId)
+          .single();
 
-    const { data: enrollments } = await supabase
-      .from("enrollment_lecture")
-      .select("id")
-      .eq("course_id", session.course_lecture_id);
+        if (sessionError || !session) return;
 
-    const { data: attendanceRecords } = await supabase
-      .from("attendance_record")
-      .select("lecture_enrollment_id, status")
-      .eq("session_id", session.id);
+        // Determine which ID column has a value
+        const courseId = session.course_lecture_id || session.course_tutorial_id;
+        if (!courseId) return;
 
-    // Map enrollment id to attendance status
-    const presentStatuses = "present";
-    let present = 0;
-    let absent = 0;
-    enrollments.forEach((enroll) => {
-      const record = attendanceRecords.find(
-        (rec) => rec.lecture_enrollment_id === enroll.id && presentStatuses.includes(rec.status)
-      );
-      if (record) present += 1;
-      else absent += 1;
-    });
-    setPresentCount(present);
-    setAbsentCount(absent);
-  };
-  fetchCounts();
-  intervalId = setInterval(fetchCounts, 5000); // Poll every 5 seconds
-  return () => clearInterval(intervalId);
-}, [currentAttendanceId]);
+        // Determine table based on class type
+        const enrollmentTable = selectedClass.type === "Tutorial" ? "enrollment_tutorial" : "enrollment_lecture";
+        const enrollmentIdField = selectedClass.type === "Tutorial" ? "tutorial_id" : "course_id";
+
+        const { data: enrollments, error: enrollError } = await supabase
+          .from(enrollmentTable)
+          .select("id")
+          .eq(enrollmentIdField, courseId);
+
+        if (enrollError) throw enrollError;
+
+        const { data: attendanceRecords, error: attError } = await supabase
+          .from("attendance_record")
+          .select("lecture_enrollment_id, tutorial_enrollment_id, status")
+          .eq("session_id", session.id);
+
+        if (attError) throw attError;
+
+        // Determine which enrollment field to use
+        const enrollmentField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
+
+        let present = 0;
+        let absent = 0;
+
+        if (enrollments && enrollments.length > 0) {
+          enrollments.forEach((enroll) => {
+            const record = (attendanceRecords || []).find(
+              (rec) => rec[enrollmentField] === enroll.id && rec.status === "present"
+            );
+            if (record) present += 1;
+            else absent += 1;
+          });
+        }
+
+        setPresentCount(present);
+        setAbsentCount(absent);
+      } catch (error) {
+        console.error("Error fetching attendance counts:", error);
+      }
+    };
+
+    fetchCounts();
+    intervalId = setInterval(fetchCounts, 5000);
+    return () => clearInterval(intervalId);
+  }, [currentAttendanceId, selectedClass?.id, selectedClass?.type, sessionActive]);
 
 useEffect(() => {
   if (!selectedClass) {
@@ -164,10 +265,13 @@ useEffect(() => {
   }
   let isMounted = true;
   const fetchEnrolled = async () => {
+    const enrollmentTable = selectedClass.type === "Tutorial" ? "enrollment_tutorial" : "enrollment_lecture";
+    const enrollmentIdField = selectedClass.type === "Tutorial" ? "tutorial_id" : "course_id";
+
     const { data, error } = await supabase
-      .from("enrollment_lecture")
+      .from(enrollmentTable)
       .select("student_id")
-      .eq("course_id", selectedClass.id);
+      .eq(enrollmentIdField, selectedClass.id);
     if (isMounted) setEnrolledStudents(data ? data.map(e => e.student_id) : []);
   };
   fetchEnrolled();
@@ -220,112 +324,217 @@ useEffect(() => {
   }
 
   function ClassCardWithEnrollmentCount({ cls, addresses, onClick }) {
-  const [totalStudents, setTotalStudents] = React.useState(null);
+    const [totalStudents, setTotalStudents] = React.useState(null);
 
-  React.useEffect(() => {
-    let isMounted = true;
-    const fetchEnrollment = async () => {
-      const { data, error } = await supabase
-        .from("enrollment_lecture")
-        .select("id")
-        .eq("course_id", cls.id);
-      if (isMounted) setTotalStudents(data ? data.length : 0);
-    };
-    fetchEnrollment();
-    return () => { isMounted = false; };
-  }, [cls.id]);
+    React.useEffect(() => {
+      let isMounted = true;
+      const fetchEnrollment = async () => {
+        const enrollmentTable = cls.type === "Tutorial" ? "enrollment_tutorial" : "enrollment_lecture";
+        const enrollIdField = cls.type === "Tutorial" ? "tutorial_id" : "course_id";
 
-  return (
-    <Card
-      className="cursor-pointer hover:bg-muted/50 border mt-[20px]"
-      style={{ background: "#09090b" }}
-      onClick={onClick}
-    >
-      <div className="p-4 m-[15px]">
-        <h4 className="mb-[0px] text-[18px]">
-          {cls.course_code}: {cls.course_title}
-        </h4>
-        <Typography color="text.secondary">
-          {cls.day_of_week && cls.lecture_start_time && cls.lecture_end_time
-            ? `${cls.day_of_week}, ${cls.lecture_start_time.slice(0, 5)} - ${cls.lecture_end_time.slice(0, 5)}`
-            : "No schedule info"}
-        </Typography>
-      </div>
-      <CardContent style={{ paddingTop: "5px" }}>
-        <div className="flex items-center text-sm" style={{ color: "#a1a1aa" }}>
-          <LocationOnIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
-          {cls.lecture_location && cls.lecture_location.trim() !== ""
-            ? cls.lecture_location
-            : (cls.lat && cls.long
-              ? (addresses[cls.id] || `Lat: ${Number(cls.lat).toFixed(5)}, Long: ${Number(cls.long).toFixed(5)}`)
-              : "No location info")}
-        </div>
-        <div className="flex items-center text-sm mt-2" style={{ color: "#a1a1aa" }}>
-          <GroupIcon style={{ color: "#a1a1aa", marginRight: 8, width: 16, height: 16 }} />
-          {totalStudents === null ? "Loading students..." : `${totalStudents} enrolled students`}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+        const { data, error } = await supabase
+          .from(enrollmentTable)
+          .select("id")
+          .eq(enrollIdField, cls.id);
+        if (isMounted) setTotalStudents(data ? data.length : 0);
+      };
+      fetchEnrollment();
+      return () => { isMounted = false; };
+    }, [cls.id]);
 
-  // 1. Start session: insert new row and store its id (attendance_session table)
-  const handleStartSession = async () => {
-    setIsLoading(true)
+    const startTime = cls.type === "Tutorial" ? cls.tutorial_start_time : cls.lecture_start_time;
+    const endTime = cls.type === "Tutorial" ? cls.tutorial_end_time : cls.lecture_end_time;
+    const location = cls.type === "Tutorial" ? cls.tutorial_location : cls.lecture_location;
+
+    return (
+      <Card
+        onClick={onClick}
+        sx={{
+          cursor: "pointer",
+          mb: 2,
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+        }}
+      >
+        <CardContent sx={{ p: 2 }}>
+          <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
+            {cls.course_code}: {cls.course_title}
+          </Typography>
+
+          <Typography
+              variant="caption"
+              sx={{
+                backgroundColor: cls.type === "Lecture" ? "#dbeafe" : "#fce7f3",
+                color: cls.type === "Lecture" ? "#0c4a6e" : "#831843",
+                px: 1.5,
+                py: 0.5,
+                borderRadius: 1,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                ml: 1,
+              }}
+            >
+              {cls.type || "Lecture"}
+            </Typography>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            {cls.day_of_week && startTime && endTime
+              ? `${cls.day_of_week}, ${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`
+              : "No schedule info"}
+          </Typography>
+
+          <Box display="flex" alignItems="center" sx={{ mt: 1 }}>
+            <LocationOnIcon sx={{ mr: 1, fontSize: 16, color: "text.secondary" }} />
+            <Typography variant="caption" color="text.secondary">
+              {location && location.trim() !== ""
+                ? location
+                : (cls.lat && cls.long
+                  ? (addresses[cls.id] || `Lat: ${Number(cls.lat).toFixed(5)}, Long: ${Number(cls.long).toFixed(5)}`)
+                  : "No location info")}
+            </Typography>
+          </Box>
+
+          <Box display="flex" alignItems="center" sx={{ mt: 1 }}>
+            <GroupIcon sx={{ mr: 1, fontSize: 16, color: "text.secondary" }} />
+            <Typography variant="caption" color="text.secondary">
+              {totalStudents === null ? "Loading students..." : `${totalStudents} enrolled students`}
+            </Typography>
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  }
+
+const handleStartSession = () => {
+  setChooseModeDialogOpen(true);
+};
+
+const handleChooseMode = async (mode) => {
+  setAttendanceMode(mode);
+  setChooseModeDialogOpen(false);
+  if (mode === "Physical") {
+    await QRSession(mode); // Directly start QR session
+  } else if (mode === "Online") {
+    setOnlineDialogOpen(true);
+  }
+};
+
+  // QR session: insert new row and store its id (attendance_session table)
+  const QRSession = async (mode) => {
+    console.log("Starting QRSession with mode:", mode);
+    console.log("Selected class:", selectedClass);
+    
+    if (!selectedClass.id) {
+      alert("Invalid class selected");
+      return;
+    }
+
+    const isTutorial = selectedClass.type === "Tutorial";
+    
+    // For lectures, verify required time fields exist
+    if (!isTutorial) {
+      if (!selectedClass.lecture_start_time || !selectedClass.lecture_end_time) {
+        console.error("Lecture missing required time fields:", selectedClass);
+        alert("This lecture is missing required time information. Please update the class details first.");
+        return;
+      }
+    } else {
+      if (!selectedClass.tutorial_start_time || !selectedClass.tutorial_end_time) {
+        console.error("Tutorial missing required time fields:", selectedClass);
+        alert("This tutorial is missing required time information. Please update the class details first.");
+        return;
+      }
+    }
+    
+    setIsLoading(true);
     setSessionActive(true);
     setSessionStartTime(new Date());
+    const specialPassword = uuidv4();
+    
     localStorage.setItem("attendanceSession", JSON.stringify({
       sessionActive: true,
       sessionStartTime: new Date().toISOString(),
-      selectedClassId: selectedClass.id
+      selectedClassId: selectedClass.id,
+      attendanceMode: mode,
     }));
-    try {
-      const position = await getCurrentLocation()
-      const location = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-      }
-      setCurrentLocation(location)
-      setSessionType("start")
-      setQrDialogOpen(true)
-      setSnackbar({
-        open: true,
-        message: `Attendance session started.`,
-        severity: "success",
-      })
-      // Generate the special password
-      const specialPassword = uuidv4();
 
-      // Create new attendance session row
+    try {
+      let location = null;
+      if (mode === "Physical") {
+        const position = await getCurrentLocation();
+        location = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setCurrentLocation(location);
+      } else {
+        location = { lat: null, lng: null };
+        setCurrentLocation(null);
+      }
+
+      // Create attendance session payload - explicitly set both columns
+      const insertData = {
+        latitude: location.lat,
+        longitude: location.lng,
+        attendance_password: specialPassword,
+        course_lecture_id: null,
+        course_tutorial_id: null,
+      };
+
+      // Determine type and set ONLY the correct column
+      const isTutorial = selectedClass.type === "Tutorial";
+      
+      if (isTutorial) {
+        insertData.course_tutorial_id = selectedClass.id;
+      } else {
+        insertData.course_lecture_id = selectedClass.id;
+      }
+
+      console.log("Inserting attendance_session with data:", insertData);
+
+      // Insert session - ONLY into attendance_session table
       const { data, error } = await supabase
         .from('attendance_session')
-        .insert([{
-          course_lecture_id: selectedClass.id,
-          latitude: location.lat,
-          longitude: location.lng,
-          attendance_password: specialPassword
-          // add other fields if needed
-        }])
+        .insert([insertData])
         .select()
         .single();
-      if (error) throw error;
-      setCurrentAttendanceId(data.id); // store the new session's id
-      setClassAttendance(data);
+
+      if (error) {
+        console.error("Supabase error details:", error);
+        throw error;
+      }
+
+      console.log("Session created successfully:", data);
+
+      setCurrentAttendanceId(data.id);
       setCurrentSessionPassword(specialPassword);
-    } catch (error) {
+      setSessionType("start");
+      
+      // Open the QR dialog
+      setQrDialogOpen(true);
+
       setSnackbar({
         open: true,
-        message: "Failed to start session.",
+        message: `Attendance session started (${mode}).`,
+        severity: "success",
+      });
+    } catch (error) {
+      console.error("Error in QRSession:", error);
+      setSnackbar({
+        open: true,
+        message: "Failed to start session. " + error.message,
         severity: "error",
-      })
+      });
+      setSessionActive(false);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   // 2. Fetch attendance data by session id (attendance_session table)
   useEffect(() => {
-    if (!currentAttendanceId) return;
+    if (!currentAttendanceId || !sessionActive)  return;
     const fetchClassAttendance = async () => {
       const { data, error } = await supabase
         .from("attendance_session")
@@ -339,7 +548,7 @@ useEffect(() => {
     // Optionally poll for updates
     const interval = setInterval(fetchClassAttendance, 5000);
     return () => clearInterval(interval);
-  }, [currentAttendanceId]);
+  }, [currentAttendanceId, sessionActive]);
 
   // Optionally, poll for updates to the session's students list
   // useEffect(() => {
@@ -359,32 +568,46 @@ useEffect(() => {
   // }, [selectedClass, currentAttendanceId]);
 
   const handleEndSession = async () => {
-    setIsLoading(true)
-    try {
-      const position = await getCurrentLocation()
-      const location = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
+    if (requireQrToEnd) {
+      const pw = uuidv4();
+      setCurrentSessionPassword(pw);
+
+      // Determine correct column name based on class type
+      const isTutorial = selectedClass.type === "Tutorial";
+
+      const insertData = {
+        latitude: currentLocation?.lat,
+        longitude: currentLocation?.lng,
+        attendance_password: pw,
+        course_lecture_id: null,
+        course_tutorial_id: null,
+      };
+
+      if (isTutorial) {
+        insertData.course_tutorial_id = selectedClass.id;
+      } else {
+        insertData.course_lecture_id = selectedClass.id;
       }
-      setCurrentLocation(location)
-      setSessionEndTime(new Date())
-      setSessionType("end")
-      setQrDialogOpen(true)
-      setSnackbar({
-        open: true,
-        message: `Attendance session ended. Location captured: ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`,
-        severity: "success",
-      })
-    } catch (error) {
-      setSnackbar({
-        open: true,
-        message: "Failed to end session. Could not access your location.",
-        severity: "error",
-      })
-    } finally {
-      setIsLoading(false)
+
+      const { data: endSessionData, error: endSessionError } = await supabase
+        .from("attendance_session")
+        .insert([insertData])
+        .select()
+        .single();
+
+      if (endSessionError) {
+        console.error("Failed to create end session:", endSessionError);
+        alert("Failed to end session. Please try again.");
+        return;
+      }
+
+      setCurrentAttendanceId(endSessionData.id);
+      setSessionType("end");
+      setQrDialogOpen(true);
+    } else {
+      handleFinalizeSession();
     }
-  }
+  };
 
   const handleFinalizeSession = () => {
     setSessionActive(false)
@@ -478,47 +701,81 @@ useEffect(() => {
 
   if (isLoading && !selectedClass) {
     return (
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <div className="flex h-[400px] items-center justify-center">
-          <div className="flex flex-col items-center gap-2">
-            <AutorenewIcon className="h-8 w-8 animate-spin text-muted-foreground" />
-            <p className="text-muted-foreground">Loading class data...</p>
-          </div>
+      <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
+        <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
+          <Sidebar />
         </div>
+
+        <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
+          <div>
+            <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
+              Attendance Management
+            </h2>
+            <p className="text-[14px]" style={{ color: "#374151" }}>
+              View and manage attendance sessions, students and reports
+            </p>
+          </div>
+
+          <div className="flex items-center justify-center" style={{ height: "60vh" }}>
+            <div className="flex flex-col items-center gap-2">
+              <AutorenewIcon className="h-8 w-8 animate-spin text-muted-foreground" />
+              <Typography color="text.secondary">Loading class data...</Typography>
+            </div>
+          </div>
+        </main>
       </div>
-    )
+    );
   }
 
   if (!selectedClass) {
     return (
-      <div className="grid grid-cols-[250px_1fr] gap-[40px] h-screen w-screen">
-        <div className="fixed h-screen w-[250px]">
-            <Sidebar />
+      <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
+        <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
+          <Sidebar />
         </div>
-        <div className="col-start-2 overflow-y-auto p-8 pt-[40px] pr-[40px]">
-            <div className="flex items-center justify-between">
-                <h2 className="text-3xl font-bold tracking-tight">Attendance Management</h2>
-            </div>
-            <div>
-                <Card className="border color-[#e5e7eb] w-full" style={{ background: "#09090b"}}>
-                <div className="pb-2 m-[20px] mb-[0px]">
-                    <Typography variant="h6" component="div">Select a Class</Typography>
-                    <Typography variant="body2" color="text.secondary">Please select a class to manage attendance</Typography>
-                </div>
-                <CardContent>
-                    <div className="space-y-4">
-                    <div className="relative">
-                        <InputField
-                            id="search-classes"
-                            placeholder="Search classes..."
-                            value={searchTerm}
-                            onChange={handleSearchChange}
-                            icon={<FaSearch className='text-[#ffffff] w-[16px] h-[16px]' />}
-                            iconPosition="left"
-                            className="flex-1 h-[40px] pl-10 w-full"
-                        />
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+
+        <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
+          <div>
+            <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
+              Attendance Management
+            </h2>
+            <p className="text-[14px]" style={{ color: "#374151" }}>
+              Select a class to manage attendance
+            </p>
+          </div>
+
+          <Box mt={3}>
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight="bold">Select a Class</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Please select a class to manage attendance</Typography>
+
+                <Box mb={2}>
+                  <TextField
+                    id="search-classes"
+                    placeholder="Search classes..."
+                    value={searchTerm}
+                    onChange={handleSearchChange}
+                    size="small"
+                    fullWidth
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <FaSearch style={{ color: "#64748b", width: 16, height: 16 }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    sx={{
+                      backgroundColor: "#ffffff",
+                      borderRadius: 1,
+                      "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+                      "&:hover .MuiOutlinedInput-notchedOutline": { borderColor: "#cbd5e1" },
+                      "&.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: "#0f172a" },
+                    }}
+                  />
+                </Box>
+
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {filteredClasses.map((cls) => (
                     <ClassCardWithEnrollmentCount
                       key={cls.id}
@@ -528,205 +785,303 @@ useEffect(() => {
                     />
                   ))}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </Box>
+        </main>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   return (
-    <div className="grid grid-cols-[250px_1fr] gap-[40px] h-screen w-screen">
-        <div className="fixed h-screen w-[250px]">
-            <Sidebar />
-        </div>
-      <div className="col-start-2 overflow-y-auto pt-[40px] pr-[40px]">
-        <div className="flex flex-row items-start justify-between flex-wrap gap-4 mb-4">
-            <div>
-            <h2 className="text-3xl font-bold tracking-tight mb-[0px]">
-                {selectedClass.course_code}: {selectedClass.course_title}
-            </h2>
-            <p className="text-muted-foreground m-[0px]" style={{ color: "#a1a1aa" }}>
-                {selectedClass.day_of_week && selectedClass.lecture_start_time && selectedClass.lecture_end_time
-                ? `${selectedClass.day_of_week}, ${selectedClass.lecture_start_time.slice(0,5)} - ${selectedClass.lecture_end_time.slice(0,5)}`
-                : "No schedule info"}
+    <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
+      <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
+        <Sidebar />
+      </div>
+
+      <main
+        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh" }}
+      >
+        <div>
+          <h2
+            className="text-[24px] font-inter font-semibold leading-[30px] text-left"
+            style={{ color: "#0f172a", marginBottom: 0 }}
+          >
+            Attendance Management
+          </h2>
+          <div className="flex justify-between items-center">
+            <p
+              className="text-[14px] font-inter font-normal leading-[17px] text-left"
+              style={{ color: "#374151" }}
+            >
+              View and manage attendance sessions, students and reports
             </p>
-            <p className="text-muted-foreground mt-[0px]" style={{ color: "#a1a1aa" }}>
-                {selectedClass.lecture_location && selectedClass.lecture_location.trim() !== ""
-                ? selectedClass.lecture_location
-                : (selectedClass.lat && selectedClass.long
-                    ? (addresses[selectedClass.id] || `Lat: ${Number(selectedClass.lat).toFixed(5)}, Long: ${Number(selectedClass.long).toFixed(5)}`)
-                    : "No location info")}
-            </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-            <Button
+            <div className="flex items-center gap-2">
+              <Button
                 size="small"
                 onClick={handleStartSession}
                 disabled={sessionActive || isLoading}
                 className="gap-2 "
-            >
+              >
                 <QrCodeIcon className="h-4 w-4" />
                 Start Attendance
-            </Button>
-            <Button
-                size="small"
-                onClick={handleEndSession}
-                disabled={!sessionActive || isLoading}
-                variant="outline"
-                className="gap-2 ml-[8px]"
-            >
-                <QrCodeIcon className="h-4 w-4" />
-                End Attendance
-            </Button>
-            <Button
+              </Button>
+              
+              {sessionActive && requireQrToEnd && (
+                <Button
+                  size="small"
+                  onClick={handleEndSession}
+                  disabled={isLoading}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  <QrCodeIcon className="h-4 w-4" />
+                  End Attendance
+                </Button>
+              )}
+
+              <Button
                 size="small"
                 onClick={handleGenerateReport}
                 variant="outline"
                 className="gap-2 ml-[8px]"
-            >
+              >
                 <DownloadIcon className="h-4 w-4" />
                 Generate Report
-            </Button>
+              </Button>
             </div>
+          </div>
         </div>
 
-      {sessionActive && classAttendance && (
-        <Card
-            sx={{
-            border: '1px solid',
-            borderColor: '#4caf50',
-            marginTop: '10px',
-            backgroundColor: '#09090b',
-            }}
-        >
-            <Box sx={{backgroundColor: 'rgba(232, 245, 233, 0.1)' ,p: 2,}}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                <Typography sx={{ color: '#388e3c', fontWeight: 'bold', fontSize: '1.25rem' }}>
-                Active Attendance Session
-                </Typography>
-                <Chip sx={{ backgroundColor: '#4caf50', color: '#09090b' }} label="Live"/>
-            </Box>
-            <Typography color="text.secondary" >
-                Session started at {sessionStartTime?.toLocaleTimeString()}
+       {selectedClass && (
+         <Box mt={2} mb={2}>
+           <Typography variant="h6" fontWeight="bold">
+             {selectedClass.course_code}: {selectedClass.course_title}
+           </Typography>
+           <Typography variant="body2" color="text.secondary">
+             {selectedClass.day_of_week && selectedClass.startTime && selectedClass.endTime
+               ? `${selectedClass.day_of_week}, ${selectedClass.startTime.slice(0, 5)} - ${selectedClass.endTime.slice(0, 5)}`
+               : "No schedule information"}
+             {" • "}
+             {selectedClass.location || "No location"}
+           </Typography>
+         </Box>
+       )}
+
+        <Box my={3}>
+          <Card sx={{ p: 2, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+            <Typography variant="body2" color="text.secondary">
+              Live sessions: {sessionActive ? "1 active" : "No active sessions"}
             </Typography>
-            </Box>
+          </Card>
+        </Box>
 
-            <CardContent sx={{ p: 2 }}>
-            <Box
-                sx={{
-                display: 'grid',
-                gap: 2,
-                gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+        {!selectedClass && (
+          <div className="grid grid-cols-3 gap-[20px] mt-6">
+           <Card
+             className="border"
+             sx={{
+               background: "#ffffff",
+               border: "1px solid #e2e8f0",
+               boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+             }}
+           >
+             <CardContent>
+               <Typography variant="subtitle2" color="text.secondary">
+                 Active Session
+               </Typography>
+               <Typography variant="h5" fontWeight="bold">
+                 {sessionActive ? "Running" : "None"}
+               </Typography>
+               <Typography variant="body2" color="text.secondary">
+                 {sessionActive ? `Started ${sessionStartTime?.toLocaleTimeString()}` : "Start a session to track attendance"}
+               </Typography>
+             </CardContent>
+           </Card>
+ 
+           <Card
+             className="border"
+             sx={{
+               background: "#ffffff",
+               border: "1px solid #e2e8f0",
+               boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+             }}
+           >
+             <CardContent>
+               <Typography variant="subtitle2" color="text.secondary">
+                 Present
+               </Typography>
+               <Typography variant="h5" fontWeight="bold">
+                 {presentCount}
+               </Typography>
+               <Typography variant="body2" color="text.secondary">
+                 Students marked present
+               </Typography>
+             </CardContent>
+           </Card>
+ 
+           <Card
+             className="border"
+             sx={{
+               background: "#ffffff",
+               border: "1px solid #e2e8f0",
+               boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+             }}
+           >
+             <CardContent>
+               <Typography variant="subtitle2" color="text.secondary">
+                 Absent
+               </Typography>
+               <Typography variant="h5" fontWeight="bold">
+                 {absentCount}
+               </Typography>
+               <Typography variant="body2" color="text.secondary">
+                 Students currently absent
+               </Typography>
+             </CardContent>
+           </Card>
+          </div>
+        )}
+
+        {!selectedClass && (
+          <>
+            <Box display="flex" alignItems="center" mb={3} mt={3}>
+              <TextField
+                id="search-classes-overview"
+                placeholder="Search classes or code"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                size="small"
+                fullWidth
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <FaSearch style={{ color: "#64748b", width: 16, height: 16 }} />
+                    </InputAdornment>
+                  ),
                 }}
-            >
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <AccessTimeIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
-                    <Typography sx={{ fontSize: '0.875rem' }}>
-                        Duration: {formatDuration(sessionStartTime)}
-                    </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <CalendarTodayIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
-                    <Typography sx={{ fontSize: '0.875rem' }}>
-                    {new Date().toLocaleDateString(undefined, {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric',
-                    })}
-                    </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <LocationOnIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
-                    <Typography sx={{ fontSize: '0.875rem' }}>
-                    Location:{' '}
-                    {currentLocation
-                        ? `${currentLocation.lat.toFixed(6)}, ${currentLocation.lng.toFixed(6)}`
-                        : 'Unknown'}
-                    </Typography>
-                </Box>
-                </Box>
-
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <PersonAddAlt1Icon sx={{ fontSize: 20, color: '#4caf50' }} />
-                    <Typography sx={{ fontSize: '0.875rem' }}>
-                    Present: {presentCount} students
-                    </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <PersonRemoveIcon sx={{ fontSize: 20, color: '#ff0000' }} />
-                    <Typography sx={{ fontSize: '0.875rem' }}>
-                    Absent: {absentCount} students
-                    </Typography>
-                </Box>
-                </Box>
-            </Box>
-            </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4 md:grid-cols-3 w-full mt-[20px]">
-        <AttendanceStats
-          classData={{ ...selectedClass, students: enrolledStudents }}
-          classAttendance={classAttendance}
-          presentCount={presentCount}
-          absentCount={absentCount}
-        />
-      </div>
-
-      <Card className="border mt-[20px] mb-[20px]" style={{ background: "#09090b" }}>
-        <div className="flex-1 ml-[20px]">
-            <h2 className="mb-[0px]">Student Attendance</h2>
-            <Typography variant="body2" color="text.secondary">View and manage student attendance for this class</Typography>
-        </div>
-        <CardContent>
-          {!selectedStudent && (
-            <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
-              <Tab label={`Present (${presentCount})`} value="present"/>
-              <Tab label={`Absent (${absentCount})`} value="absent"/>
-              <Tab label={`Excused (${Array.isArray(classAttendance?.students) ? classAttendance.students.length : 0})`} value="excused"/>
-              <Tab label={`Flagged (${Array.isArray(classAttendance?.students) ? classAttendance.students.length : 0})`} value="flagged"/>
-            </Tabs>
-          )}
-          {!selectedStudent ? (
-            <>
-              <StudentAttendanceList
-                statusFilter={activeTab}
-                onSelectStudent={handleSelectStudent}
-                classAttendanceId={currentAttendanceId}
+                sx={{
+                  backgroundColor: "#ffffff",
+                  borderRadius: 1,
+                  "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+                }}
               />
-            </>
-          ) : (
-            <StudentDetailsCard
-              student={selectedStudent}
-              onClose={handleCloseStudentDetails}
-              onMarkPresent={handleMarkPresent}
-            />
-          )}
-        </CardContent>
-      </Card>
+            </Box>
 
-      <AttendanceSession
-        open={qrDialogOpen}
-        onOpenChange={setQrDialogOpen}
-        sessionType={sessionType}
-        classData={selectedClass}
-        location={currentLocation}
-        onFinalize={handleFinalizeSession}
-        onExpire={handleSessionExpire}
-        sessionPassword={currentSessionPassword} 
-      />
-      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={handleCloseSnackbar}>
-        <MuiAlert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {filteredClasses.map((cls) => (
+                <div key={cls.id}>
+                  <div onClick={() => router(`/attendance-management?classId=${cls.id}`)}>
+                    <Card
+                      className="cursor-pointer border"
+                      sx={{
+                        background: "#ffffff",
+                        border: "1px solid #e2e8f0",
+                        boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+                        mb: 2,
+                      }}
+                    >
+                      <CardContent>
+                        <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
+                          {cls.course_code}: {cls.course_title}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {cls.day_of_week ? `${cls.day_of_week}` : "No schedule info"}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {cls.location || (cls.lat && cls.long ? `${Number(cls.lat).toFixed(4)}, ${Number(cls.long).toFixed(4)}` : "No location")}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {selectedClass && (
+          <Box mt={4}>
+            {sessionActive && classAttendance && (
+              <Card sx={{ mt: 2, background: "#ffffff", border: "1px solid #e2e8f0" }}>
+                <CardContent>
+                  <Typography variant="subtitle2" color="text.secondary">Active Attendance Session</Typography>
+                  <Typography>{sessionStartTime?.toLocaleTimeString()}</Typography>
+                </CardContent>
+              </Card>
+            )}
+
+            <Box mt={2}>
+              <AttendanceStats
+                classData={{ ...selectedClass, students: enrolledStudents }}
+                classAttendance={classAttendance}
+                presentCount={presentCount}
+                absentCount={absentCount}
+              />
+            </Box>
+
+            <Box mt={2}>
+              {!selectedStudent && (
+                <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}>
+                  <Tab label={`Present (${presentCount})`} value="present" />
+                  <Tab label={`Absent (${absentCount})`} value="absent" />
+                  <Tab label={`Excused (${Array.isArray(classAttendance?.students) ? classAttendance.students.length : 0})`} value="excused" />
+                  <Tab label={`Flagged (${Array.isArray(classAttendance?.students) ? classAttendance.students.length : 0})`} value="flagged" />
+                </Tabs>
+              )}
+
+              {!selectedStudent ? (
+                <StudentAttendanceList
+                  statusFilter={activeTab}
+                  onSelectStudent={handleSelectStudent}
+                  classAttendanceId={currentAttendanceId}
+                />
+              ) : (
+                <StudentDetailsCard
+                  student={selectedStudent}
+                  onClose={() => setSelectedStudent(null)}
+                  onMarkPresent={handleMarkPresent}
+                />
+              )}
+            </Box>
+          </Box>
+        )}
+
+        <AttendanceIssues />
+
+        <AttendanceSession
+          open={qrDialogOpen}
+          onOpenChange={setQrDialogOpen}
+          sessionType={sessionType}
+          classData={selectedClass}
+          location={currentLocation}
+          onFinalize={handleFinalizeSession}
+          onExpire={handleSessionExpire}
+          sessionPassword={currentSessionPassword}
+          sessionId={currentAttendanceId}
+          requireQrToEnd={requireQrToEnd}
+          setRequireQrToEnd={setRequireQrToEnd}
+        />
+
+        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+          <MuiAlert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
             {snackbar.message}
-        </MuiAlert>
-    </Snackbar>
-</div>
+          </MuiAlert>
+        </Snackbar>
+
+        <ChooseModeDialog
+          open={chooseModeDialogOpen}
+          onClose={() => setChooseModeDialogOpen(false)}
+          onChoose={handleChooseMode}
+        />
+
+        <OnlineAttendanceDialog
+          open={onlineDialogOpen}
+          onClose={() => setOnlineDialogOpen(false)}
+          onProceed={handleOnlineProceed}
+        />
+      </main>
     </div>
-  )
+  );
 }

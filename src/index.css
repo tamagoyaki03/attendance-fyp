@@ -13,3 +13,42 @@ body {
 * {
   box-sizing: border-box;
 }
+
+/* global interactive polish */
+* {
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+/* buttons and cards hover */
+button, .MuiButton-root {
+  transition: transform 120ms ease, box-shadow 160ms ease;
+}
+.MuiButton-root:hover {
+  transform: translateY(-2px);
+}
+
+/* cards elevation on hover */
+.MuiCard-root:hover {
+  box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+}
+
+/* DatePicker popup / days (portal) */
+.MuiPickersDay-root {
+  color: #0f172a !important;
+}
+.MuiPickersDay-root.Mui-selected,
+.MuiPickersDay-root:focus {
+  background-color: #0f172a !important;
+  color: #ffffff !important;
+}
+.MuiPickersCalendarHeader-label, .MuiPickersCalendarHeader-switchViewButton {
+  color: #0f172a !important;
+}
+
+/* Select / input focused outline color (safety) */
+.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+  border-color: #0f172a !important;
+}
+.MuiInputLabel-root.Mui-focused {
+  color: #0f172a !important;
+}

@@ -15,6 +15,9 @@ import {
   Chip,
   InputAdornment,
   CircularProgress,
+  Card,
+  CardContent,
+  Typography,
 } from "@mui/material";
 import {
   Search as SearchIcon,
@@ -31,44 +34,44 @@ export default function StudentView() {
   const [selectedStudent, setSelectedStudent] = useState(null);
 
   useEffect(() => {
-  const fetchStudents = async () => {
-    setLoading(true);
+    const fetchStudents = async () => {
+      setLoading(true);
 
-    // Step 1: Fetch all students
-    const { data: usersData, error: usersError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("role", "student");
+      // Step 1: Fetch all students
+      const { data: usersData, error: usersError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("role", "student");
 
-    // Step 2: Fetch all enrollment records
-    const { data: enrollmentData, error: enrollmentError } = await supabase
-      .from("enrollment_lecture")
-      .select("student_id");
+      // Step 2: Fetch all enrollment records
+      const { data: enrollmentData, error: enrollmentError } = await supabase
+        .from("enrollment_lecture")
+        .select("student_id");
 
-    if (!usersError && !enrollmentError && usersData && enrollmentData) {
-      const classCountMap = enrollmentData.reduce((acc, row) => {
-        acc[row.student_id] = (acc[row.student_id] || 0) + 1;
-        return acc;
-      }, {});
+      if (!usersError && !enrollmentError && usersData && enrollmentData) {
+        const classCountMap = enrollmentData.reduce((acc, row) => {
+          acc[row.student_id] = (acc[row.student_id] || 0) + 1;
+          return acc;
+        }, {});
 
-      const mergedStudents = usersData.map((user) => ({
-        id: user.id,
-        studentId: user.student_id || user.id,
-        name: user.name || user.email,
-        email: user.email,
-        year: user.year || "-",
-        enrolledClasses: classCountMap[user.id] || 0,
-        status: user.status || "active",
-      }));
+        const mergedStudents = usersData.map((user) => ({
+          id: user.id,
+          studentId: user.student_id || user.id,
+          name: user.name || user.email,
+          email: user.email,
+          year: user.year || "-",
+          enrolledClasses: classCountMap[user.id] || 0,
+          status: user.status || "active",
+        }));
 
-      setStudents(mergedStudents);
-    }
+        setStudents(mergedStudents);
+      }
 
-    setLoading(false);
-  };
+      setLoading(false);
+    };
 
-  fetchStudents();
-}, []);
+    fetchStudents();
+  }, []);
 
   const handleMenuClose = () => {
     setMenuAnchorEl(null);
@@ -91,84 +94,101 @@ export default function StudentView() {
     return filtered;
   }, [students, searchTerm, filterStatus]);
 
-  return (
-    <Box>
-      <Box display="flex" gap={2} mb={2}>
-        <TextField
-          variant="outlined"
-          size="small"
-          placeholder="Search students..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
-              </InputAdornment>
-            ),
-          }}
-          fullWidth
-        />
-        <Menu
-          anchorEl={menuAnchorEl}
-          open={Boolean(menuAnchorEl) && !selectedStudent}
-          onClose={handleMenuClose}
-        >
-          <MenuItem onClick={() => { setFilterStatus("all"); handleMenuClose(); }}>All</MenuItem>
-          <MenuItem onClick={() => { setFilterStatus("active"); handleMenuClose(); }}>Active</MenuItem>
-          <MenuItem onClick={() => { setFilterStatus("inactive"); handleMenuClose(); }}>Inactive</MenuItem>
-        </Menu>
-      </Box>
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      backgroundColor: "#ffffff",
+      color: "#0f172a",
+      "& fieldset": { borderColor: "#e6edf3" },
+      "&:hover fieldset": { borderColor: "#cbd5e1" },
+      "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+    },
+  };
 
-      {loading ? (
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight={200}>
-          <CircularProgress />
+  return (
+    <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+      <CardContent>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">Students</Typography>
+          <Menu
+            anchorEl={menuAnchorEl}
+            open={Boolean(menuAnchorEl) && !selectedStudent}
+            onClose={handleMenuClose}
+          >
+            <MenuItem onClick={() => { setFilterStatus("all"); handleMenuClose(); }}>All</MenuItem>
+            <MenuItem onClick={() => { setFilterStatus("active"); handleMenuClose(); }}>Active</MenuItem>
+            <MenuItem onClick={() => { setFilterStatus("inactive"); handleMenuClose(); }}>Inactive</MenuItem>
+          </Menu>
         </Box>
-      ) : (
-        <TableContainer component={Paper} sx={{ background: "#09090b", border: "1px solid #fff", borderRadius: 2}}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Student ID</TableCell>
-                <TableCell>Name</TableCell>
-                <TableCell>Year</TableCell>
-                <TableCell>Classes</TableCell>
-                <TableCell>Status</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredStudents.map((student) => (
-                <TableRow key={student.id}>
-                  <TableCell>{student.studentId}</TableCell>
-                  <TableCell>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Avatar>{student.name.charAt(0)}</Avatar>
-                      <Box>
-                        <div>{student.name}</div>
-                        <div style={{ fontSize: 12, color: "gray" }}>{student.email}</div>
-                      </Box>
-                    </Box>
-                  </TableCell>
-                  <TableCell>{student.year}</TableCell>
-                  <TableCell>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <BookIcon fontSize="small" />
-                      {student.enrolledClasses}
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={student.status === "active" ? "Active" : "Inactive"}
-                      color={student.status === "active" ? "success" : "default"}
-                      size="small"
-                    />
-                  </TableCell>
+
+        <Box display="flex" gap={2} mb={2}>
+          <TextField
+            variant="outlined"
+            size="small"
+            placeholder="Search students..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+            }}
+            fullWidth
+            sx={inputSx}
+          />
+        </Box>
+
+        {loading ? (
+          <Box display="flex" justifyContent="center" alignItems="center" minHeight={200}>
+            <CircularProgress />
+          </Box>
+        ) : (
+          <TableContainer component={Paper} sx={{ background: "#ffffff", border: "1px solid #e6edf3", borderRadius: 1 }}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Student ID</TableCell>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Year</TableCell>
+                  <TableCell>Classes</TableCell>
+                  <TableCell>Status</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
-    </Box>
+              </TableHead>
+              <TableBody>
+                {filteredStudents.map((student) => (
+                  <TableRow key={student.id}>
+                    <TableCell>{student.studentId}</TableCell>
+                    <TableCell>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Avatar>{student.name?.charAt(0) || "?"}</Avatar>
+                        <Box>
+                          <div style={{ fontWeight: 500 }}>{student.name}</div>
+                          <div style={{ fontSize: 12, color: "#6b7280" }}>{student.email}</div>
+                        </Box>
+                      </Box>
+                    </TableCell>
+                    <TableCell>{student.year}</TableCell>
+                    <TableCell>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <BookIcon fontSize="small" />
+                        {student.enrolledClasses}
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={student.status === "active" ? "Active" : "Inactive"}
+                        color={student.status === "active" ? "success" : "default"}
+                        size="small"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -7,10 +7,9 @@ import {
   TableHead,
   TableRow,
   Paper,
-  Checkbox,
-  Button,
   Chip,
   Typography,
+  Box,
 } from "@mui/material";
 import { toast } from "react-toastify";
 
@@ -37,26 +36,10 @@ const absenceData = [
     mcSubmitted: true,
     status: "Under Review",
   },
-  // ...add the rest of your absenceData
 ];
 
 export default function AbsenceTable() {
-  const [absences, setAbsences] = useState(absenceData);
-  const [selectedRows, setSelectedRows] = useState([]);
-
-  const handleSelectAll = (checked) => {
-    setSelectedRows(checked ? absences.map((a) => a.id) : []);
-  };
-
-  const handleSelectRow = (id, checked) => {
-    setSelectedRows((prev) =>
-      checked ? [...prev, id] : prev.filter((rowId) => rowId !== id)
-    );
-  };
-
-  const handleSendReminder = (id) => {
-    toast.success("Reminder sent to student.");
-  };
+  const [absences] = useState(absenceData);
 
   const getStatusChip = (status) => {
     switch (status) {
@@ -81,51 +64,100 @@ export default function AbsenceTable() {
   };
 
   return (
-    <TableContainer component={Paper} sx={{ mt: 2, background: "#09090b", border: "1px solid #fff", borderRadius: 2 }}>
+    <TableContainer
+      component={Paper}
+      sx={{
+        mt: 2,
+        background: "#ffffff",
+        border: "1px solid #e2e8f0",
+        borderRadius: 2,
+        boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+      }}
+    >
       <Table size="small">
         <TableHead>
-            <TableRow>
-            <TableCell>Student</TableCell>
-            <TableCell>Course</TableCell>
-            <TableCell>Date & Time</TableCell>
-            <TableCell>Email Status</TableCell>
-            <TableCell>MC Status</TableCell>
-            <TableCell>Status</TableCell>
+          <TableRow>
+            <TableCell>
+              <Typography variant="subtitle2" color="text.secondary">
+                Student
+              </Typography>
+            </TableCell>
+            <TableCell>
+              <Typography variant="subtitle2" color="text.secondary">
+                Course
+              </Typography>
+            </TableCell>
+            <TableCell>
+              <Typography variant="subtitle2" color="text.secondary">
+                Date & Time
+              </Typography>
+            </TableCell>
+            <TableCell>
+              <Typography variant="subtitle2" color="text.secondary">
+                Email Status
+              </Typography>
+            </TableCell>
+            <TableCell>
+              <Typography variant="subtitle2" color="text.secondary">
+                MC Status
+              </Typography>
+            </TableCell>
+            <TableCell>
+              <Typography variant="subtitle2" color="text.secondary">
+                Status
+              </Typography>
+            </TableCell>
           </TableRow>
         </TableHead>
+
         <TableBody>
           {absences.map((absence) => (
-            <TableRow key={absence.id}>
+            <TableRow
+              key={absence.id}
+              sx={{
+                "&:hover": { backgroundColor: "#f8fafc" },
+              }}
+            >
+              <TableCell>
+                <Box>
+                  <Typography fontWeight="bold" color="text.primary">
+                    {absence.student}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {absence.studentId}
+                  </Typography>
+                </Box>
+              </TableCell>
 
               <TableCell>
-                <Typography fontWeight="bold">{absence.student}</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {absence.studentId}
-                </Typography>
+                <Typography color="text.primary">{absence.course}</Typography>
               </TableCell>
-              <TableCell>{absence.course}</TableCell>
+
               <TableCell>
                 <div>{absence.date}</div>
                 <Typography variant="caption" color="text.secondary">
                   {absence.time}
                 </Typography>
               </TableCell>
+
               <TableCell>
                 <Chip
                   label={absence.emailSent ? "Sent" : "Not Sent"}
                   size="small"
-                  variant="outlined"
+                  variant={absence.emailSent ? "filled" : "outlined"}
                   color={absence.emailSent ? "success" : "error"}
                 />
               </TableCell>
+
               <TableCell>
                 <Chip
                   label={absence.mcSubmitted ? "Submitted" : "Not Submitted"}
                   size="small"
-                  variant="outlined"
+                  variant={absence.mcSubmitted ? "filled" : "outlined"}
                   color={absence.mcSubmitted ? "success" : "error"}
                 />
               </TableCell>
+
               <TableCell>{getStatusChip(absence.status)}</TableCell>
             </TableRow>
           ))}

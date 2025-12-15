@@ -1,160 +1,164 @@
 import React, { useState, useEffect } from "react";
 import {
+  Box,
   Card,
   CardContent,
-  InputLabel,
   Typography,
-  Button,
+  TextField,
+  InputAdornment,
   Select,
   MenuItem,
   FormControl,
-  TextField
+  InputLabel,
+  Button,
 } from "@mui/material";
-import InputField from "../components/InputField";
+import { Search as SearchIcon } from "@mui/icons-material";
 import Sidebar from "../components/Sidebar";
 import FraudTable from "../components/FraudTable";
-import { FaSearch } from "react-icons/fa";
-import supabase from "../config/supabaseClient"; 
+import supabase from "../config/supabaseClient";
 
 export default function FraudDetection() {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [course, setCourse] = useState("");
-  const [session, setSession] = useState("current");
   const [distance, setDistance] = useState(1.0);
   const [courses, setCourses] = useState([]);
 
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-  };
-
   useEffect(() => {
-    // Fetch courses/classes from Supabase
     const fetchCourses = async () => {
-      const { data, error } = await supabase
-        .from('classes') 
-        .select('id, code, name');
+      const { data, error } = await supabase.from("classes").select("id, code, name");
       if (!error && data) {
         setCourses(data);
-        if (data.length > 0) setCourse(data[0].id); // Set default selected course
+        if (data.length > 0) setCourse(data[0].id);
       }
     };
     fetchCourses();
   }, []);
 
   return (
-    <div className="grid grid-cols-[250px_1fr] gap-[40px] h-screen w-screen bg-[#121212]">
-      <div className="fixed h-screen w-[250px]">
+    <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
+      <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
         <Sidebar />
       </div>
-        <div className="col-start-2 overflow-y-auto p-8 pt-[40px] pr-[40px]">
-            <div className="flex items-center justify-between">
-                <h2 className="text-3xl font-bold tracking-tight">Fraud Detection</h2>
-                {/* <div className="flex items-center space-x-2">
-                </div> */}
-            </div>
 
-            <div className="grid gap-[40px] grid-cols-2">
-                <Card className="border color-[#e5e7eb]" style={{ background: "#09090b" }}>
-                <div className="pb-2 m-[20px] mb-[0px]">
-                    <Typography variant="h6" component="div">Location Analysis</Typography>
-                    <Typography variant="body2" color="text.secondary">Compare student and lecturer locations</Typography>
-                </div>
-                <CardContent>
-                    <div className="grid gap-2">
-                    <div className="space-y-1">
-                        <FormControl fullWidth style={{marginTop: '10px'}}>
-                        <InputLabel id="course-label">Course</InputLabel>
-                        <Select
-                            labelId="course-label"
-                            id="course"
-                            value={course}
-                            label="Course"
-                            onChange={e => setCourse(e.target.value)}
-                        >
-                            {courses.map(cls => (
-                              <MenuItem key={cls.id} value={cls.id}>
-                                {cls.code} - {cls.name}
-                              </MenuItem>
-                            ))}
-                        </Select>
-                        </FormControl>
-                        {/* <FormControl fullWidth style={{marginTop: '20px'}}>
-                        <InputLabel id="session-label">Session</InputLabel>
-                        <Select
-                            labelId="session-label"
-                            id="session"
-                            value={session}
-                            label="Session"
-                            onChange={e => setSession(e.target.value)}
-                        >
-                            <MenuItem value="current">Current Session</MenuItem>
-                            <MenuItem value="morning">Morning (9:00 AM)</MenuItem>
-                            <MenuItem value="afternoon">Afternoon (2:00 PM)</MenuItem>
-                            <MenuItem value="evening">Evening (6:00 PM)</MenuItem>
-                        </Select>
-                        </FormControl> */}
-                    </div>
-                    <div className="space-y-1" style={{marginTop: '10px'}}>
-                        <InputLabel htmlFor="distance">Max Distance (km)</InputLabel>
-                        <div className="flex space-x-2 w-full">
-                        <TextField
-                            id="distance"
-                            type="number"
-                            value={distance}
-                            onChange={e => setDistance(e.target.value)}
-                            inputProps={{ min: 0.1, max: 5.0, step: 0.1 }}
-                            size="small"
-                            fullWidth
-                        />
-                        <Button variant="contained" style={{color: "#09090b", backgroundColor: "#ffffff", marginLeft: '10px'}}>Apply</Button>
-                        </div>
-                    </div>
-                    </div>
-                </CardContent>
-                </Card>
-
-                <Card className="border" style={{ background: "#09090b" }}>
-                <div className="pb-2 m-[20px] mb-[0px]">
-                    <Typography variant="h6" component="div">Time Analysis</Typography>
-                    <Typography variant="body2" color="text.secondary">Check for suspicious check-in/out patterns</Typography>
-                </div>
-                <CardContent>
-                    <div className="grid gap-2">
-                    <div className="space-y-1 ">
-                        <InputLabel htmlFor="buffer">Late Buffer (minutes)</InputLabel>
-                        <div className="mb-[20px]">
-                            <TextField id="buffer" type="number" defaultValue="5" min="0" max="30" />
-                        </div>
-                    </div>
-                    <Button className="w-full" style={{color: "#09090b", backgroundColor: "#ffffff"}}>Update Settings</Button>
-                    </div>
-                </CardContent>
-                </Card>
-            </div>
-
-            <Card className="border mt-[20px]" style={{ background: "#09090b" }}>
-                <div className="flex flex-row items-center">
-                    <div className="flex-1 ml-[20px]">
-                        <h2 className="mb-[0px]">Fraud Alert Log</h2>
-                        <Typography variant="body2" color="text.secondary">Detailed list of all detected fraud alerts</Typography>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                        <div className="relative">
-                            <InputField
-                                id="search-fraud"
-                                placeholder="Search"
-                                value={searchTerm}
-                                onChange={handleSearchChange}
-                                icon={<FaSearch className='text-[#ffffff] w-[16px] h-[16px]' />}
-                                iconPosition="left"
-                                className="flex-1 h-[40px] mr-[20px]"
-                              />
-                        </div>
-                    </div>
-                </div>
-                <CardContent><FraudTable searchTerm={searchTerm}  /></CardContent>
-            </Card>
+      <main
+        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh" }}
+      >
+        <div>
+          <h2
+            className="text-[24px] font-inter font-semibold leading-[30px] text-left"
+            style={{ color: "#0f172a", marginBottom: 0 }}
+          >
+            Fraud Detection
+          </h2>
+          <p className="text-[14px]" style={{ color: "#374151" }}>
+            Identify suspicious check-ins and location anomalies
+          </p>
         </div>
+
+        <div className="grid gap-[40px] grid-cols-2 mt-6">
+          <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+            <Box sx={{ p: 2, pb: 0 }}>
+              <Typography variant="h6">Location Analysis</Typography>
+              <Typography variant="body2" color="text.secondary">Compare student and lecturer locations</Typography>
+            </Box>
+            <CardContent>
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel id="course-label">Course</InputLabel>
+                <Select
+                  labelId="course-label"
+                  id="course"
+                  value={course}
+                  label="Course"
+                  onChange={(e) => setCourse(e.target.value)}
+                  size="small"
+                >
+                  {courses.map((cls) => (
+                    <MenuItem key={cls.id} value={cls.id}>
+                      {cls.code} - {cls.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <Box mb={2}>
+                <InputLabel htmlFor="distance" sx={{ mb: 1, display: "block", color: "text.secondary" }}>
+                  Max Distance (km)
+                </InputLabel>
+                <Box display="flex" gap={1}>
+                  <TextField
+                    id="distance"
+                    type="number"
+                    value={distance}
+                    onChange={(e) => setDistance(e.target.value)}
+                    inputProps={{ min: 0.1, max: 5.0, step: 0.1 }}
+                    size="small"
+                    sx={{ flex: 1, "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }}
+                  />
+                  <Button variant="contained" sx={{ bgcolor: "#0f172a", color: "#fff", "&:hover": { bgcolor: "#0b1320" } }}>
+                    Apply
+                  </Button>
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+            <Box sx={{ p: 2, pb: 0 }}>
+              <Typography variant="h6">Time Analysis</Typography>
+              <Typography variant="body2" color="text.secondary">Check for suspicious check-in/out patterns</Typography>
+            </Box>
+            <CardContent>
+              <Box mb={2}>
+                <InputLabel htmlFor="buffer" sx={{ mb: 1, display: "block", color: "text.secondary" }}>
+                  Late Buffer (minutes)
+                </InputLabel>
+                <TextField id="buffer" type="number" defaultValue={5} size="small" fullWidth sx={{ "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }} />
+              </Box>
+
+              <Button variant="contained" sx={{ bgcolor: "#0f172a", color: "#fff", "&:hover": { bgcolor: "#0b1320" } }}>
+                Update Settings
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card sx={{ mt: 4, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+          <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", p: 2 }}>
+            <Box>
+              <Typography variant="h6">Fraud Alert Log</Typography>
+              <Typography variant="body2" color="text.secondary">Detailed list of detected fraud alerts</Typography>
+            </Box>
+
+            <Box sx={{ width: 320 }}>
+              <TextField
+                id="search-fraud"
+                placeholder="Search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                size="small"
+                fullWidth
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" sx={{ color: "#64748b" }} />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{
+                  backgroundColor: "#ffffff",
+                  borderRadius: 1,
+                  "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+                }}
+              />
+            </Box>
+          </Box>
+
+          <CardContent>
+            <FraudTable searchTerm={searchTerm} courseId={course} />
+          </CardContent>
+        </Card>
+      </main>
     </div>
-  )
+  );
 }

@@ -15,7 +15,9 @@ import {
   Tooltip,
   Divider,
   LinearProgress,
-  useTheme
+  useTheme,
+  TextField,
+  InputAdornment,
 } from "@mui/material";
 import {
   Download,
@@ -31,6 +33,7 @@ import {
   ShowChart,
   WarningAmber,
 } from "@mui/icons-material";
+import { Search as SearchIcon } from "@mui/icons-material";
 import Sidebar from "../components/Sidebar";
 import AttendanceTrends from "../components/Event/AttendanceTrends";
 import TopAbsenceReasons from "../components/Event/TopAbsenceReason";
@@ -58,29 +61,33 @@ export default function AnalyticsPage() {
 ];
 
   return (
-    <div className="bg-[#121212] min-h-screen w-screen">
+    <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
       <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
         <Sidebar />
       </div>
+
       <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
-        {/* Section Header */}
         <div>
-          <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left text-[#fafafa] mb-[0px]">
+          <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
             Analytics
           </h2>
-          <div className="flex justify-between items-center mb-[10px]">
-            <p className="text-[14px] font-inter font-normal leading-[17px] text-left text-[#a1a1aa]">
+          <div className="flex justify-between items-center">
+            <p className="text-[14px] font-inter font-normal leading-[17px] text-left" style={{ color: "#374151" }}>
               Comprehensive analytics and insights for attendance management
             </p>
-            <div className="flex gap-2">
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <Select
                 value={timeRange}
                 onChange={(e) => setTimeRange(e.target.value)}
                 size="small"
-                sx={{ minWidth: 150, background: "#18181b", color: "#fafafa" }}
+                sx={{
+                  minWidth: 150,
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #e6edf3",
+                }}
                 MenuProps={{
                   PaperProps: {
-                    sx: { background: "#18181b", color: "#fafafa" },
+                    sx: { background: "#ffffff" },
                   },
                 }}
               >
@@ -90,8 +97,9 @@ export default function AnalyticsPage() {
                 <MenuItem value="year">This Year</MenuItem>
                 <MenuItem value="custom">Custom Range</MenuItem>
               </Select>
+
               <Tooltip title="Refresh">
-                <IconButton onClick={refreshData} disabled={isLoading} sx={{ color: "#fafafa" }}>
+                <IconButton onClick={refreshData} disabled={isLoading} sx={{ color: "#0f172a" }}>
                   <Refresh className={isLoading ? "animate-spin" : ""} />
                 </IconButton>
               </Tooltip>
@@ -99,113 +107,89 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-4 gap-[10px]">
+        {/* KPI Cards (white cards, Overview style) */}
+        <div className="grid grid-cols-4 gap-[10px] mt-6">
           {[
-            {
-              title: "Average Attendance Rate",
-              value: "87.3%",
-              icon: <BarChart />,
-              change: "+2.5%",
-              trend: <TrendingUp />,
-              trendColor: "#22c55e",
-            },
-            {
-              title: "Chronic Absenteeism",
-              value: "8.2%",
-              icon: <CalendarToday />,
-              change: "+0.7%",
-              trend: <TrendingUp />,
-              trendColor: "#ef4444",
-            },
-            {
-              title: "Late Check-ins",
-              value: "12.4%",
-              icon: <AccessTime />,
-              change: "-1.2%",
-              trend: <TrendingDown />,
-              trendColor: "#22c55e",
-            },
-            {
-              title: "Fraud Attempts",
-              value: "1.8%",
-              icon: <WarningAmber />,
-              change: "-0.3%",
-              trend: <TrendingDown />,
-              trendColor: "#22c55e",
-            },
+            { title: "Average Attendance Rate", value: "87.3%", icon: <BarChart />, change: "+2.5%", trend: <TrendingUp />, trendColor: "#22c55e" },
+            { title: "Chronic Absenteeism", value: "8.2%", icon: <CalendarToday />, change: "+0.7%", trend: <TrendingUp />, trendColor: "#ef4444" },
+            { title: "Late Check-ins", value: "12.4%", icon: <AccessTime />, change: "-1.2%", trend: <TrendingDown />, trendColor: "#22c55e" },
+            { title: "Fraud Attempts", value: "1.8%", icon: <WarningAmber />, change: "-0.3%", trend: <TrendingDown />, trendColor: "#22c55e" },
           ].map((card, i) => (
-            <Card key={i} className="border" style={{ background: "#09090b", color: "#fafafa" }}>
+            <Card key={i} sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
               <CardHeader
-                title={<Typography variant="subtitle2">{card.title}</Typography>}
-                avatar={<Box color="#a1a1aa">{card.icon}</Box>}
+                title={<Typography variant="subtitle2" color="text.secondary">{card.title}</Typography>}
+                avatar={<Box color="text.secondary">{card.icon}</Box>}
               />
               <CardContent>
-                <Box display="flex" alignItems="center" gap={1}>
-                  <Typography variant="h5">{card.value}</Typography>
-                  <Typography variant="body2" sx={{ color: card.trendColor }}>
-                    {card.trend} {card.change}
-                  </Typography>
+                <Box display="flex" alignItems="center" gap={1} justifyContent="space-between">
+                  <Box>
+                    <Typography variant="h5" fontWeight="bold">{card.value}</Typography>
+                    <Typography variant="caption" color="text.secondary">Compared to previous period</Typography>
+                  </Box>
+                  <Box textAlign="right">
+                    <Typography variant="body2" sx={{ color: card.trendColor, display: "flex", alignItems: "center", gap: 0.5 }}>
+                      {card.trend} {card.change}
+                    </Typography>
+                  </Box>
                 </Box>
-                <Typography variant="caption" color="#a1a1aa">
-                  Compared to previous period
-                </Typography>
               </CardContent>
             </Card>
           ))}
         </div>
 
         <Box mt={2}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
-              <Card className="border" style={{ background: "#09090b", color: "#fafafa"}}>
-                <CardHeader title="Attendance Trends" subheader="Daily attendance rates over time" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px]">
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
+              <CardHeader title="Attendance Trends" subheader="Daily attendance rates over time" />
+              <CardContent>
                 <AttendanceTrends />
-              </Card>
-              <Card className="border" style={{ background: "#09090b", color: "#fafafa"}}>
-                <CardHeader title="Top Absence Reasons" subheader="Most common reasons for absences" />
-                <TopAbsenceReasons />
-              </Card>
-            </div>
+              </CardContent>
+            </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px] mt-[20px]">
-              <Card className="border" style={{ background: "#09090b", color: "#fafafa" }}>
-                <CardHeader title="Fraud Detection Analysis" subheader="Detected fraud patterns and trends" />
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
+              <CardHeader title="Top Absence Reasons" subheader="Most common reasons for absences" />
+              <CardContent>
+                <TopAbsenceReasons />
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-[20px] mt-[20px]">
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
+              <CardHeader title="Fraud Detection Analysis" subheader="Detected fraud patterns and trends" />
+              <CardContent>
                 <FraudDetectionChart />
-              </Card>
-              <Card className="border" style={{ background: "#09090b", color: "#fafafa" }}>
-                <CardHeader title="Fraud by Method" />
-                <CardContent sx={{ height: 300, pt: 2 }}>
+              </CardContent>
+            </Card>
+
+            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
+              <CardHeader title="Fraud by Method" />
+              <CardContent sx={{ height: 300, pt: 2 }}>
                 <Box display="flex" flexDirection="column" gap={3}>
-                    {fraudItems.map((item) => (
+                  {fraudItems.map((item) => (
                     <Box key={item.label} display="flex" flexDirection="column" gap={1}>
-                        <Box display="flex" justifyContent="space-between">
-                        <Typography variant="body2" fontWeight="medium">
-                            {item.label}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                            {`${item.value}%`}
-                        </Typography>
-                        </Box>
-                        <LinearProgress
+                      <Box display="flex" justifyContent="space-between">
+                        <Typography variant="body2" fontWeight="medium">{item.label}</Typography>
+                        <Typography variant="body2" color="text.secondary">{`${item.value}%`}</Typography>
+                      </Box>
+                      <LinearProgress
                         variant="determinate"
                         value={item.value}
                         sx={{
-                            height: 8,
-                            borderRadius: 4,
-                            backgroundColor: theme.palette.grey[300],
-                            '& .MuiLinearProgress-bar': {
-                            backgroundColor: item.color,
-                            },
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: theme.palette.grey[300],
+                          '& .MuiLinearProgress-bar': { backgroundColor: item.color },
                         }}
-                        />
+                      />
                     </Box>
-                    ))}
+                  ))}
                 </Box>
-                </CardContent>
-              </Card>
-            </div>
+              </CardContent>
+            </Card>
+          </div>
         </Box>
       </main>
     </div>
-  );
+ );
 }

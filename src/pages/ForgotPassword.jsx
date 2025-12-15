@@ -27,13 +27,26 @@ export default function ForgotPasswordPage() {
   const [resetMessage, setResetMessage] = useState("")
   const navigate = useNavigate()
 
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      color: "#0f172a",
+      backgroundColor: "#fff",
+      borderRadius: 1,
+      "& fieldset": { borderColor: "#e6edf3" },
+      "&:hover fieldset": { borderColor: "#cbd5e1" },
+      "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+    },
+    "& .MuiInputLabel-root": { color: "#64748b" },
+    "& .MuiInputLabel-root.Mui-focused": { color: "#0f172a" },
+    input: { color: "#0f172a" },
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setIsLoading(true)
     setError("")
     setResetMessage("")
 
-    // Supabase password reset (sends code to email)
     const { error } = await supabase.auth.resetPasswordForEmail(email)
     setIsLoading(false)
     if (error) {
@@ -50,7 +63,6 @@ export default function ForgotPasswordPage() {
     setError("")
     setResetMessage("")
 
-    // Confirm password reset with OTP code
     const { data, error } = await supabase.auth.verifyOtp({
       email,
       token: otp,
@@ -65,60 +77,50 @@ export default function ForgotPasswordPage() {
       setResetMessage("Password reset successful! You can now log in.")
       setTimeout(() => {
         navigate("/")
-      }, 2000)
-    }
-  }
-
-  const style = {
-    color: "#fafafa",
-    backgroundColor: "#18181b",
-    borderRadius: '8px',
-    margin: '5px 0',
-    "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
-        borderColor: "#ffffff",
-    },
-    "& .MuiOutlinedInput-root": {
-        "& fieldset": { borderColor: "#27272a" },
-        "&:hover fieldset": { borderColor: "#fafafa" },
-        "&.Mui-focused fieldset": { borderColor: "#fafafa" },
-    },
-    "& .MuiInputBase-input": {
-        color: "#fafafa",
-        paddingLeft: '10px',
-        height: '15px'
-    },
-    "& input:-webkit-autofill": {
-        WebkitBoxShadow: "0 0 0 1000px #18181b inset",
-        WebkitTextFillColor: "#fafafa",
-        transition: "background-color 5000s ease-in-out 0s",
+      }, 1800)
     }
   }
 
   return (
-    <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="100vh" p={2} sx={{background: 'black' }}>
+    <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" minHeight="100vh" p={2} sx={{ background: "#f8fafc" }}>
       <Box display="flex" alignItems="center" gap={1} mb={4}>
-        <FaBell style={{ color: 'white', height: '24px', width: '24px' }} />
-        <Typography variant="h4" fontWeight="bold">
+        <FaBell style={{ color: '#0f172a', height: '24px', width: '24px' }} />
+        <Typography variant="h4" fontWeight="bold" color="#0f172a">
           Attendance
         </Typography>
       </Box>
 
-      <Card sx={{ width: "100%", maxWidth: 400 , background: "black", color: "#ffffff" }} className="border">
+      <Card
+        sx={{
+          width: "100%",
+          maxWidth: 440,
+          background: "#ffffff",
+          color: "#0f172a",
+          borderRadius: 2,
+          boxShadow: "none",
+          transition: "transform 160ms ease, box-shadow 160ms ease",
+          "&:hover": { transform: "translateY(-6px)", boxShadow: "0 10px 30px rgba(2,6,23,0.08)" },
+          p: 0,
+        }}
+      >
         <CardHeader
-          title={<Typography variant="h5" fontWeight="bold">Reset Password</Typography>}
+          title={<Typography variant="h5" fontWeight="bold" color="#0f172a">Reset Password</Typography>}
           subheader={
-            !isSubmitted
-              ? "Enter your email and we'll send you a reset code"
-              : showReset
-              ? "Enter the code sent to your email and your new password"
-              : ""
+            <Typography variant="body2" color="text.secondary" sx={{ opacity: 0.95 }}>
+              {!isSubmitted
+                ? "Enter your email and we'll send you a reset code"
+                : showReset
+                ? "Enter the code sent to your email and your new password"
+                : ""
+              }
+            </Typography>
           }
         />
 
         {!isSubmitted ? (
           <form onSubmit={handleSubmit} noValidate>
-            <CardContent sx={{paddingTop: "0px", paddingBottom: "0px"}}>
-              <Typography fontSize={16} color="white" fontWeight={600}>
+            <CardContent sx={{ paddingTop: "0px", paddingBottom: "0px" }}>
+              <Typography fontSize={16} color="#0f172a" fontWeight={600}>
                 Email
               </Typography>
               <TextField
@@ -129,26 +131,27 @@ export default function ForgotPasswordPage() {
                 margin="normal"
                 required
                 placeholder="admin@university.edu"
-                sx={style}
+                sx={inputSx}
               />
               {error && <Typography variant="body2" color="error">{error}</Typography>}
             </CardContent>
             <CardActions sx={{ flexDirection: "column", alignItems: "stretch", px: 2, pb: 2 }} disableSpacing>
-              <Button variant="contained" type="submit" disabled={isLoading} fullWidth sx={{ backgroundColor: "#fff" }}>
-                {isLoading ? <CircularProgress size={24} /> : "Send reset code"}
+              <Button variant="contained" type="submit" disabled={isLoading} fullWidth sx={{ backgroundColor: "#0f172a", color: "#fff", textTransform: "none", "&:hover": { backgroundColor: "#0b1320" } }}>
+                {isLoading ? <CircularProgress size={20} sx={{ color: "#fff" }} /> : "Send reset code"}
               </Button>
-              <Box display="flex" justifyContent="center" mt={2} >
+              <Box display="flex" justifyContent="center" mt={2} width="100%">
                 <Button
                   variant="outlined"
                   startIcon={<ArrowBack />}
                   onClick={() => navigate("/")}
                   fullWidth
                   sx={{
-                    color: "#fff",
-                    borderColor: "#fff",
+                    color: "#0f172a",
+                    borderColor: "#e6edf3",
+                    backgroundColor: "transparent",
                     "&:hover": {
-                      borderColor: "#fafafa",
-                      backgroundColor: "rgba(255,255,255,0.08)",
+                      borderColor: "#cbd5e1",
+                      backgroundColor: "rgba(15,23,42,0.04)",
                     },
                   }}
                 >
@@ -160,7 +163,7 @@ export default function ForgotPasswordPage() {
         ) : (
           <form onSubmit={handleResetPassword} noValidate>
             <CardContent>
-              <Typography fontSize={16} color="white" fontWeight={600}>
+              <Typography fontSize={16} color="#0f172a" fontWeight={600}>
                 Verification Code
               </Typography>
               <TextField
@@ -170,10 +173,10 @@ export default function ForgotPasswordPage() {
                 value={otp}
                 onChange={e => setOtp(e.target.value)}
                 placeholder="Enter the code sent to your email"
-                sx={style}
+                sx={inputSx}
                 required
               />
-              <Typography fontSize={16} color="white" fontWeight={600} mt={2}>
+              <Typography fontSize={16} color="#0f172a" fontWeight={600} mt={2}>
                 New Password
               </Typography>
               <TextField
@@ -184,7 +187,7 @@ export default function ForgotPasswordPage() {
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
                 placeholder="Enter your new password"
-                sx={style}
+                sx={inputSx}
                 required
               />
               {error && <Typography variant="body2" color="error">{error}</Typography>}
@@ -195,21 +198,22 @@ export default function ForgotPasswordPage() {
               )}
             </CardContent>
             <CardActions sx={{ flexDirection: "column", alignItems: "stretch", px: 2, pb: 2 }} disableSpacing>
-              <Button variant="contained" type="submit" disabled={isLoading} fullWidth sx={{ backgroundColor: "#fff" }}>
-                {isLoading ? <CircularProgress size={24} /> : "Reset Password"}
+              <Button variant="contained" type="submit" disabled={isLoading} fullWidth sx={{ backgroundColor: "#0f172a", color: "#fff", textTransform: "none", "&:hover": { backgroundColor: "#0b1320" } }}>
+                {isLoading ? <CircularProgress size={20} sx={{ color: "#fff" }} /> : "Reset Password"}
               </Button>
-              <Box display="flex" justifyContent="center" mt={2}>
+              <Box display="flex" justifyContent="center" mt={2} width="100%">
                 <Button
                   variant="outlined"
                   startIcon={<ArrowBack />}
                   onClick={() => navigate("/")}
                   fullWidth
                   sx={{
-                    color: "#fff",
-                    borderColor: "#fff",
+                    color: "#0f172a",
+                    borderColor: "#e6edf3",
+                    backgroundColor: "transparent",
                     "&:hover": {
-                      borderColor: "#fafafa",
-                      backgroundColor: "rgba(255,255,255,0.08)",
+                      borderColor: "#cbd5e1",
+                      backgroundColor: "rgba(15,23,42,0.04)",
                     },
                   }}
                 >
