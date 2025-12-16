@@ -19,19 +19,108 @@ export default function Overview() {
   const [searchTerm, setSearchTerm] = useState("");
   const [tab, setTab] = useState("classes");
   const [userClasses, setUserClasses] = useState([]);
+  const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // read sessionStorage at runtime (not at module import time)
-  const currentUser = JSON.parse(sessionStorage.getItem("user") || "null") || {};
-  const userRole = currentUser.role || "lecturer";
-  const userId = currentUser.id || null;
+  const [leaveRequests, setLeaveRequests] = useState({
+   fraudCases: 0,
+    pendingLeave: 0,
+    pendingDocuments: 0
+  });
+  const [loadingNotifications, setLoadingNotifications] = useState(true);
 
   useEffect(() => {
-    if (!userId) {
-      // nothing to fetch yet
-      setUserClasses([]);
+    if (!user?.id || user.role !== "lecturer") {
+      setLoadingNotifications(false);
       return;
     }
 
+    const fetchLeaveRequests = async () => {
+      try {
+        console.log("Fetching leave requests for lecturer:", user.id);
+        
+        const { data: lecturerClasses, error: classError } = await supabase
+          .from("course_lecture")
+          .select("id")
+          .eq("lecturer_id", user.id);
+
+        if (classError) {
+          console.error("Error fetching lecturer classes:", classError);
+          return;
+        }
+
+        const classIds = lecturerClasses?.map(cls => cls.id) || [];
+        console.log("Class IDs for lecturer:", classIds);
+        
+        if (classIds.length === 0) {
+          setLoadingNotifications(false);
+          return;
+        }
+
+       const { data: leaveData, error: leaveError } = await supabase
+         .from("leave_requests")
+         .select("id, status, course_id")
+         .eq("status", "pending")
+         .in("course_id", classIds);
+
+        if (leaveError) {
+          console.error("Error fetching leave requests:", leaveError);
+          console.error("Leave error details:", leaveError.message);
+          return;
+        }
+
+        const pendingLeave = leaveData?.length || 0;
+        
+        console.log("Found pending leave requests:", pendingLeave);
+        console.log("Leave data:", leaveData);
+
+        setLeaveRequests(prev => ({
+          ...prev,
+          pendingLeave: pendingLeave
+        }));
+
+      } catch (error) {
+        console.error("Error fetching leave requests:", error);
+      } finally {
+        setLoadingNotifications(false);
+      }
+    };
+
+    fetchLeaveRequests();
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+   const getUserData = () => {
+     const userData = JSON.parse(sessionStorage.getItem("user") || "null");
+     if (userData && userData.id) {
+       setUser(userData);
+       return userData;
+     }
+     return null;
+   };
+
+   const userData = getUserData();
+   if (!userData) {
+     // Retry after a short delay if user data isn't ready
+     const timer = setTimeout(() => {
+       const retryUserData = getUserData();
+       if (retryUserData) {
+         setUser(retryUserData);
+       }
+     }, 100);
+     return () => clearTimeout(timer);
+   }
+ }, []);
+
+  useEffect(() => {
+    if (!user?.id) {
+      // nothing to fetch yet
+      setUserClasses([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
     let cancelled = false;
     const fetchClasses = async () => {
       try {
@@ -42,8 +131,8 @@ export default function Overview() {
             users(name),
             enrollment_lecture(id)
           `);
-        if (userRole !== "admin") {
-          query = query.eq("lecturer_id", userId);
+        if (user.role !== "admin") {
+          query = query.eq("lecturer_id", user.id);
         }
         const { data, error } = await query;
         if (cancelled) return;
@@ -56,6 +145,8 @@ export default function Overview() {
       } catch (err) {
         console.error("Unexpected fetch error:", err);
         if (!cancelled) setUserClasses([]);
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
     };
 
@@ -64,7 +155,23 @@ export default function Overview() {
     return () => {
       cancelled = true;
     };
-  }, [userId, userRole]);
+  }, [user?.id, user?.role]);
+
+  // Show loading state
+ if (!user || isLoading) {
+   return (
+     <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
+       <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
+         <Sidebar />
+       </div>
+       <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
+         <Box display="flex" justifyContent="center" alignItems="center" height="60vh">
+           <Typography>Loading classes...</Typography>
+         </Box>
+       </main>
+     </div>
+   );
+ }
 
   const filteredClasses = userClasses.filter(
     (cls) =>
@@ -112,7 +219,7 @@ export default function Overview() {
           </div>
         </div>
 
-        {userRole === "lecturer" && (
+        {user.role === "lecturer" && !loadingNotifications && (
           <>
             <Box my={3}>
               <Alert severity="error" sx={{ fontSize: "16px" }}>
@@ -120,11 +227,21 @@ export default function Overview() {
               </Alert>
             </Box>
 
-            <Box my={3}>
-              <Alert severity="warning" sx={{ fontSize: "16px" }}>
-                <strong>New Leave Request</strong> — 3 pending leave applications awaiting review.
-              </Alert>
-            </Box>
+            {leaveRequests.pendingLeave > 0 && (
+              <Box my={3}>
+                <Alert severity="warning" sx={{ fontSize: "16px" }}>
+                  <strong>New Leave Request</strong> — {leaveRequests.pendingLeave} pending leave application{leaveRequests.pendingLeave !== 1 ? 's' : ''} awaiting review.
+                </Alert>
+              </Box>
+            )}
+
+            {leaveRequests.pendingLeave === 0 && (
+              <Box my={3}>
+                <Alert severity="success" sx={{ fontSize: "16px" }}>
+                  <strong>All Clear</strong> — No pending leave requests at this time.
+                </Alert>
+              </Box>
+            )}
 
             <Box my={3}>
               <Alert severity="info" sx={{ fontSize: "16px" }}>
@@ -134,7 +251,15 @@ export default function Overview() {
           </>
         )}
 
-        {userRole === "admin" && (
+        {user.role === "lecturer" && loadingNotifications && (
+          <Box my={3}>
+            <Alert severity="info" sx={{ fontSize: "16px" }}>
+              Loading notifications...
+            </Alert>
+          </Box>
+        )}
+
+        {user.role === "admin" && (
           <>
             <Tabs
               value={tab}

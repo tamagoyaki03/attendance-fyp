@@ -5,6 +5,23 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 
 export default function AttendanceStats({ classData, presentCount = 0, absentCount = 0 }) {
+  
+  // Add loading check
+ if (!classData) {
+   return (
+     <Box display="flex" gap={2} width="100%">
+       {[1, 2, 3].map((i) => (
+         <Card key={i} sx={{ flex: 1, background: "#ffffff" }}>
+           <CardContent>
+             <Typography variant="h5">-</Typography>
+             <Typography variant="caption">Loading...</Typography>
+           </CardContent>
+         </Card>
+       ))}
+     </Box>
+   );
+ }
+
   const total = Array.isArray(classData?.students) ? classData.students.length : 0;
   const attendanceRate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
   const absenceRate = total > 0 ? Math.round((absentCount / total) * 100) : 0;

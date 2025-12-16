@@ -20,10 +20,29 @@ import supabase from "../../config/supabaseClient";
 
 async function saveSessionPassword(sessionId, password) {
   if (sessionId && password) {
-    await supabase
-      .from("attendance_session")
-      .update({ attendance_password: password })
-      .eq("id", sessionId);
+    try {
+      // Add timeout to the database query
+      const { error } = await Promise.race([
+        supabase
+          .from("attendance_session")
+          .update({ attendance_password: password })
+          .eq("id", sessionId),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Query timeout')), 10000)
+        )
+      ]);
+      
+      if (error) {
+        console.error("Error updating session password:", error);
+      } else {
+        console.log("Session password updated successfully");
+      }
+    } catch (error) {
+      console.error("Database operation failed:", error.message);
+      if (error.message === 'Query timeout') {
+        console.log("Database query timed out - session will continue without password save");
+      }
+    }
   }
 }
 
@@ -35,7 +54,7 @@ const formatTime = (seconds) => {
 
 export default function AttendanceSession({
   open,
-  onOpenChange,
+  onClose,
   sessionType,
   classData,
   onFinalize,
@@ -52,6 +71,18 @@ export default function AttendanceSession({
   const [location, setLocation] = useState(null);
   const creatingSession = useRef(false);
 
+  const handleContinueSession = () => {
+    if (onClose && typeof onClose === 'function') {
+      onClose(false);
+    }
+  };
+
+  const handleClose = () => {
+    if (onClose && typeof onClose === 'function') {
+      onClose(false);
+    }
+  };
+
   // Generate a QR code when the dialog opens
   useEffect(() => {
     if (
@@ -66,10 +97,10 @@ export default function AttendanceSession({
       (async () => {
         try {
           // Determine type from classData
-          let type = "lecture"; // default fallback
+          let type = "course"; // default fallback
           
           if (classData?.type) {
-            type = classData.type.toLowerCase() === "lecture" ? "lecture" : "tutorial";
+            type = classData.type.toLowerCase() === "lecture" ? "course" : "tutorial";
           } else if (classData?.id) {
             try {
               const { data: lectureData, error: lectureError } = await supabase
@@ -79,7 +110,7 @@ export default function AttendanceSession({
                 .single();
               
               if (lectureData && !lectureError) {
-                type = "lecture";
+                type = "course";
               } else {
                 const { data: tutorialData, error: tutorialError } = await supabase
                   .from("course_tutorial")
@@ -92,7 +123,7 @@ export default function AttendanceSession({
                 }
               }
             } catch (error) {
-              console.warn("Could not determine class type, defaulting to lecture:", error);
+              console.warn("Could not determine class type, defaulting to course:", error);
             }
           }
           
@@ -107,7 +138,7 @@ export default function AttendanceSession({
           }
         } catch (error) {
           console.error("Error generating QR code:", error);
-          const fallbackQrString = `lecture|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
+          const fallbackQrString = `course|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
           setQrValue(fallbackQrString);
         } finally {
           creatingSession.current = false;
@@ -135,7 +166,39 @@ export default function AttendanceSession({
     }
   }, [open]);
 
-  // ... rest of useEffects ...
+  // Add countdown timer effect
+  useEffect(() => {
+    let timer;
+    
+    if (open && countdown > 0 && !isExpired) {
+      timer = setInterval(() => {
+        setCountdown((prevCountdown) => {
+          if (prevCountdown <= 1) {
+            setIsExpired(true);
+            if (onExpire && typeof onExpire === 'function') {
+              onExpire();
+            }
+            return 0;
+          }
+          return prevCountdown - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [open, isExpired, sessionType, onExpire]);
+
+  // Also add this effect to reset countdown when dialog opens
+  useEffect(() => {
+    if (open && sessionType === "start") {
+      setCountdown(300); // 5 minutes
+      setIsExpired(false);
+    }
+  }, [open, sessionType]);
 
   // Update the render condition - remove location requirement
   if (!open || !classData || !qrValue) {
@@ -193,11 +256,11 @@ export default function AttendanceSession({
                     </Box>
                   )}
                 </Box>
-                <Chip
+                {/* <Chip
                   label={<Box display="flex" alignItems="center"><AccessTimeIcon sx={{ fontSize: 16, mr: 0.5 }} />Expires in {formatTime(countdown)}</Box>}
                   color={countdown < 60 ? "error" : "success"}
                   sx={{ position: "absolute", top: -12, right: 0 }}
-                />
+                /> */}
               </>
             )}
           </Box>

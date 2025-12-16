@@ -135,24 +135,47 @@ export default function AttendanceManagementPage() {
   const fetchClasses = async () => {
     setIsLoading(true);
     try {
-      // Fetch both lectures and tutorials
-      const [lectureRes, tutorialRes] = await Promise.all([
-        supabase.from('course_lecture').select('*'),
-        supabase.from('course_tutorial').select('*')
-      ]);
+      // Single optimized query for lectures with enrollment count
+       let lectureQuery = supabase
+         .from('course_lecture')
+         .select(`
+           *,
+           enrollment_lecture(id)
+         `);
+
+       let tutorialQuery = supabase
+         .from('course_tutorial')
+         .select(`
+           *,
+           enrollment_tutorial(id)
+         `);
+
+       // Filter for non-admin users
+       if (userRole !== "admin") {
+         lectureQuery = lectureQuery.eq("lecturer_id", user.id);
+         tutorialQuery = tutorialQuery.eq("lecturer_id", user.id);
+       }
+
+       const [lectureRes, tutorialRes] = await Promise.all([
+         lectureQuery,
+         tutorialQuery
+       ]);
 
       if (lectureRes.error) throw lectureRes.error;
       if (tutorialRes.error) throw tutorialRes.error;
 
-      // Combine both datasets
-      const lectures = (lectureRes.data || []).map(cls => ({ ...cls, type: "Lecture" }));
-      const tutorials = (tutorialRes.data || []).map(cls => ({ ...cls, type: "Tutorial" }));
+       // Combine with enrollment counts
+       const lectures = (lectureRes.data || []).map(cls => ({ 
+         ...cls, 
+         type: "Lecture",
+         enrollmentCount: cls.enrollment_lecture?.length || 0
+       }));
+       const tutorials = (tutorialRes.data || []).map(cls => ({ 
+         ...cls,
+         type: "Tutorial",
+         enrollmentCount: cls.enrollment_tutorial?.length || 0
+       }));
       let combined = [...lectures, ...tutorials];
-
-      // Filter classes for lecturer: only show classes where lecturer matches
-      if (userRole !== "admin") {
-        combined = combined.filter(cls => cls.lecturer_id === user.id);
-      }
 
       // Calculate duration and normalize day_of_week
       const classesWithDuration = combined.map(cls => {
@@ -1052,7 +1075,7 @@ const handleChooseMode = async (mode) => {
 
         <AttendanceSession
           open={qrDialogOpen}
-          onOpenChange={setQrDialogOpen}
+          onClose={setQrDialogOpen}
           sessionType={sessionType}
           classData={selectedClass}
           location={currentLocation}
@@ -1062,6 +1085,8 @@ const handleChooseMode = async (mode) => {
           sessionId={currentAttendanceId}
           requireQrToEnd={requireQrToEnd}
           setRequireQrToEnd={setRequireQrToEnd}
+          duration={30} 
+          isActive={sessionActive}
         />
 
         <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
