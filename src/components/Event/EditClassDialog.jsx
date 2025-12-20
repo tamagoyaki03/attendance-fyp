@@ -1,6 +1,25 @@
 import React, { useState, useEffect } from "react";
-import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Box, Button, Typography, Autocomplete, Chip } from "@mui/material";
+import { 
+  Dialog, 
+  DialogTitle, 
+  DialogContent, 
+  DialogActions, 
+  TextField, 
+  MenuItem, 
+  Box, 
+  Button, 
+  Typography, 
+  Autocomplete, 
+  Chip,
+  IconButton,
+  Tooltip,
+  Alert,
+  CircularProgress
+} from "@mui/material";
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
 import supabase from "../../config/supabaseClient";
+import { getCurrentLocation, geocodeAddress } from "../../utils/geolocationUtils";
 
 export default function EditClassDialog({ open, onClose, classData, onClassAdded }) {
   const [formData, setFormData] = useState({
@@ -13,6 +32,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
     startDate: null,
     endDate: null,
     location: "",
+    latitude: null,
+    longitude: null,
     lecturer: "",
     students: [],
   });
@@ -20,6 +41,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
   const [lecturers, setLecturers] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [locationStatus, setLocationStatus] = useState('');
 
   // Fetch lecturers and students
   useEffect(() => {
@@ -93,6 +116,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         location: classData.type === "Lecture" 
           ? classData.lecture_location || "" 
           : classData.tutorial_location || "",
+        latitude: classData.latitude || null,
+        longitude: classData.longitude || null,
         lecturer: classData.lecturer_id || "",
         students: [],
       });
@@ -127,16 +152,88 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
     }
   };
 
+  const handleGetCurrentLocation = async () => {
+    if (formData.location.toLowerCase() === 'online') {
+      setLocationStatus('Location not needed for online classes');
+      setTimeout(() => setLocationStatus(''), 3000);
+      return;
+    }
+    setIsGettingLocation(true);
+    setLocationStatus('Getting your current location...');
+    
+    try {
+      const location = await getCurrentLocation();
+      setFormData(prev => ({
+        ...prev,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        location: prev.location || `Lat: ${location.latitude.toFixed(6)}, Lng: ${location.longitude.toFixed(6)}`
+      }));
+      setLocationStatus('Current location obtained successfully!');
+      setTimeout(() => setLocationStatus(''), 3000);
+    } catch (error) {
+      console.error('Error getting location:', error);
+      setLocationStatus(`Error: ${error.message}`);
+      setTimeout(() => setLocationStatus(''), 5000);
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
+  
+  const handleGeocodeLocation = async () => {
+    if (formData.location.toLowerCase() === 'online') {
+      setLocationStatus('Location not needed for online classes');
+      setTimeout(() => setLocationStatus(''), 3000);
+      return;
+    }
+
+    if (!formData.location.trim()) {
+      setLocationStatus('Please enter a location first');
+      setTimeout(() => setLocationStatus(''), 3000);
+      return;
+    }
+    
+    setIsGettingLocation(true);
+    setLocationStatus('Getting coordinates for the location...');
+    
+    try {
+      const result = await geocodeAddress(formData.location);
+      setFormData(prev => ({
+        ...prev,
+        latitude: result.latitude,
+        longitude: result.longitude
+      }));
+      setLocationStatus('Location coordinates found!');
+      setTimeout(() => setLocationStatus(''), 3000);
+    } catch (error) {
+      console.error('Error geocoding location:', error);
+      setLocationStatus('Could not find coordinates for this location');
+      setTimeout(() => setLocationStatus(''), 5000);
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
       [name]: value,
     }));
+    
+    // Clear coordinates when location text changes
+    if (name === 'location') {
+      if (value.toLowerCase() === 'online') {
+       setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+      } else {
+        setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+      }
+    }
   };
 
   const handleClose = () => {
     console.log("Handle close called, onClose type:", typeof onClose);
+    setLocationStatus('');
     
     // Just close the dialog - don't reset form data here
     if (typeof onClose === 'function') {
@@ -163,9 +260,12 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         startDate: null,
         endDate: null,
         location: "",
+        latitude: null,
+        longitude: null,
         lecturer: "",
         students: [],
       });
+      setLocationStatus('');
     }
   }, [open]);
 
@@ -195,6 +295,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         lecture_start_time: formData.startTime,
         lecture_end_time: formData.endTime,
         lecture_location: formData.location,
+        latitude: formData.location.toLowerCase() === 'online' ? null : formData.latitude,
+        longitude: formData.location.toLowerCase() === 'online' ? null : formData.longitude,
       } : {
         course_code: formData.code,
         course_title: formData.name,
@@ -203,6 +305,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         tutorial_start_time: formData.startTime,
         tutorial_end_time: formData.endTime,
         tutorial_location: formData.location,
+        latitude: formData.location.toLowerCase() === 'online' ? null : formData.latitude,
+        longitude: formData.location.toLowerCase() === 'online' ? null : formData.longitude,
       };
 
       const { error } = await supabase
@@ -244,6 +348,12 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth disablePortal={false} keepMounted={false}>
       <DialogTitle>Edit Class</DialogTitle>
       <DialogContent>
+        {locationStatus && (
+          <Alert severity={locationStatus.includes('Error') ? 'error' : 'info'} sx={{ mb: 2 }}>
+            {locationStatus}
+          </Alert>
+        )}
+        
         <Box component="form" onSubmit={handleSubmit} sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}>
           
           <TextField
@@ -312,13 +422,57 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
             InputLabelProps={{ shrink: true }}
           />
 
-          <TextField
-            label="Location"
-            fullWidth
-            name="location"
-            value={formData.location}
-            onChange={handleChange}
-          />
+          <Box>
+            <TextField
+              label="Location"
+              fullWidth
+              name="location"
+              value={formData.location}
+              onChange={handleChange}
+              InputProps={{
+                endAdornment: (
+                  <Box display="flex" gap={0.5}>
+                    <Tooltip title="Get coordinates for entered location">
+                      <IconButton 
+                        onClick={handleGeocodeLocation} 
+                        disabled={isGettingLocation || !formData.location.trim() || formData.location.toLowerCase() === 'online'}
+                        size="small"
+                        color="primary"
+                      >
+                        {isGettingLocation ? <CircularProgress size={16} /> : <LocationOnIcon />}
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Use my current location">
+                      <IconButton 
+                        onClick={handleGetCurrentLocation} 
+                        disabled={isGettingLocation || formData.location.toLowerCase() === 'online'}
+                        size="small"
+                        color="secondary"
+                      >
+                        {isGettingLocation ? <CircularProgress size={16} /> : <MyLocationIcon />}
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                )
+              }}
+            />
+            
+            {formData.latitude && formData.longitude && formData.location.toLowerCase() !== 'online' && (
+              <Box sx={{ mt: 1, p: 1, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Coordinates: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
+                </Typography>
+              </Box>
+            )}
+
+            {formData.location.toLowerCase() === 'online' && (
+              <Box sx={{ mt: 1, p: 1, backgroundColor: '#e3f2fd', borderRadius: 1 }}>
+                <Typography variant="caption" color="primary">
+                  📱 Online class - No location coordinates needed
+                </Typography>
+              </Box>
+            )}
+          </Box>
 
           <TextField
             label="Lecturer"

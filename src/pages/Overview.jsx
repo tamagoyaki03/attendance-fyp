@@ -8,12 +8,14 @@ import {
   Tabs,
   Tab,
   TextField,
+  CircularProgress,
 } from "@mui/material";
 import { Search } from "@mui/icons-material";
 import Sidebar from "../components/Sidebar";
 import ClassAttendance from "../components/Event/ClassAttendance";
 import StudentView from "../components/Event/StudentsView";
 import supabase from "../config/supabaseClient";
+import { calculateAttendanceRate } from "../utils/attendanceUtils";
 
 export default function Overview() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -21,9 +23,15 @@ export default function Overview() {
   const [userClasses, setUserClasses] = useState([]);
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [attendanceStats, setAttendanceStats] = useState({
+   totalClasses: 0,
+   averageAttendance: 0,
+   classesBelow60: 0,
+   loading: true
+ });
 
   const [leaveRequests, setLeaveRequests] = useState({
-   fraudCases: 0,
+    fraudCases: 0,
     pendingLeave: 0,
     pendingDocuments: 0
   });
@@ -35,10 +43,11 @@ export default function Overview() {
       return;
     }
 
-    const fetchLeaveRequests = async () => {
+    const fetchNotifications = async () => {
       try {
-        console.log("Fetching leave requests for lecturer:", user.id);
+        console.log("Fetching notifications for lecturer:", user.id);
         
+        // Fetch lecturer's classes
         const { data: lecturerClasses, error: classError } = await supabase
           .from("course_lecture")
           .select("id")
@@ -57,36 +66,90 @@ export default function Overview() {
           return;
         }
 
-       const { data: leaveData, error: leaveError } = await supabase
-         .from("leave_requests")
-         .select("id, status, course_id")
-         .eq("status", "pending")
-         .in("course_id", classIds);
+        // Fetch attendance issues (fraud cases)
+        const { data: issuesData, error: issuesError } = await supabase
+          .from("attendance_issues")
+          .select(`
+            id,
+            issue_type,
+            enrollment_lecture!inner(
+              id,
+              course_lecture!inner(lecturer_id)
+            )
+          `)
+          .eq("enrollment_lecture.course_lecture.lecturer_id", user.id);
+
+        if (issuesError) {
+          console.error("Error fetching attendance issues:", issuesError);
+        } else {
+          const fraudCases = issuesData?.length || 0;
+          console.log("Found fraud cases:", fraudCases);
+          setLeaveRequests(prev => ({
+            ...prev,
+            fraudCases: fraudCases
+          }));
+        }
+
+        // Fetch leave requests
+        const { data: leaveData, error: leaveError } = await supabase
+          .from("leave_requests")
+          .select("id, status, course_id")
+          .eq("status", "pending")
+          .in("course_id", classIds);
 
         if (leaveError) {
           console.error("Error fetching leave requests:", leaveError);
-          console.error("Leave error details:", leaveError.message);
-          return;
+        } else {
+          const pendingLeave = leaveData?.length || 0;
+          console.log("Found pending leave requests:", pendingLeave);
+          setLeaveRequests(prev => ({
+            ...prev,
+            pendingLeave: pendingLeave
+          }));
         }
 
-        const pendingLeave = leaveData?.length || 0;
-        
-        console.log("Found pending leave requests:", pendingLeave);
-        console.log("Leave data:", leaveData);
+        // Fetch pending absence documents by first finding sessions for this lecturer's classes,
+        // then counting mc_submissions linked to those sessions with status pending_review
+        const { data: sessions, error: sessionsError } = await supabase
+          .from("attendance_session")
+          .select("id, course_lecture_id")
+          .in("course_lecture_id", classIds);
 
-        setLeaveRequests(prev => ({
-          ...prev,
-          pendingLeave: pendingLeave
-        }));
+        if (sessionsError) {
+          console.error("Error fetching sessions:", sessionsError);
+        } else {
+          const sessionIds = (sessions || []).map(s => s.id);
+          let pendingDocuments = 0;
+
+          if (sessionIds.length > 0) {
+            const { data: mcData, error: mcError } = await supabase
+              .from("mc_submissions")
+              .select("id")
+              .eq("status", "pending_review")
+              .in("session_id", sessionIds);
+
+            if (mcError) {
+              console.error("Error fetching MC submissions:", mcError);
+            } else {
+              pendingDocuments = mcData?.length || 0;
+            }
+          }
+
+          console.log("Found pending documents:", pendingDocuments);
+          setLeaveRequests(prev => ({
+            ...prev,
+            pendingDocuments
+          }));
+        }
 
       } catch (error) {
-        console.error("Error fetching leave requests:", error);
+        console.error("Error fetching notifications:", error);
       } finally {
         setLoadingNotifications(false);
       }
     };
 
-    fetchLeaveRequests();
+    fetchNotifications();
   }, [user?.id, user?.role]);
 
   useEffect(() => {
@@ -140,7 +203,29 @@ export default function Overview() {
           console.error("Supabase fetch error:", error);
           setUserClasses([]);
         } else {
-          setUserClasses(data || []);
+          const classesWithType = (data || []).map(c => ({ ...c, type: "Lecture" }));
+          setUserClasses(classesWithType);
+          
+          // Calculate aggregate stats
+          const classStats = await Promise.all(
+            classesWithType.map(async (classItem) => {
+              const stats = await calculateAttendanceRate(classItem.id, "Lecture");
+              return stats.attendanceRate;
+            })
+          );
+          
+          const validStats = classStats.filter(stat => !isNaN(stat) && stat >= 0);
+          const averageAttendance = validStats.length > 0
+            ? Math.round((validStats.reduce((a, b) => a + b, 0) / validStats.length) * 10) / 10
+            : 0;
+          const classesBelow60 = validStats.filter(stat => stat < 60).length;
+          
+          setAttendanceStats({
+            totalClasses: classesWithType.length,
+            averageAttendance,
+            classesBelow60,
+            loading: false
+          });
         }
       } catch (err) {
         console.error("Unexpected fetch error:", err);
@@ -221,11 +306,13 @@ export default function Overview() {
 
         {user.role === "lecturer" && !loadingNotifications && (
           <>
-            <Box my={3}>
-              <Alert severity="error" sx={{ fontSize: "16px" }}>
-                <strong>Attention Required</strong> — 5 potential fraud cases detected today.
-              </Alert>
-            </Box>
+            {leaveRequests.fraudCases > 0 && (
+              <Box my={3}>
+                <Alert severity="error" sx={{ fontSize: "16px" }}>
+                  <strong>Attention Required</strong> — {leaveRequests.fraudCases} potential fraud case{leaveRequests.fraudCases !== 1 ? 's' : ''} detected.
+                </Alert>
+              </Box>
+            )}
 
             {leaveRequests.pendingLeave > 0 && (
               <Box my={3}>
@@ -235,19 +322,21 @@ export default function Overview() {
               </Box>
             )}
 
-            {leaveRequests.pendingLeave === 0 && (
+            {leaveRequests.pendingDocuments > 0 && (
               <Box my={3}>
-                <Alert severity="success" sx={{ fontSize: "16px" }}>
-                  <strong>All Clear</strong> — No pending leave requests at this time.
+                <Alert severity="info" sx={{ fontSize: "16px" }}>
+                  <strong>Pending Review</strong> — {leaveRequests.pendingDocuments} absence document{leaveRequests.pendingDocuments !== 1 ? 's' : ''} pending review.
                 </Alert>
               </Box>
             )}
 
-            <Box my={3}>
-              <Alert severity="info" sx={{ fontSize: "16px" }}>
-                <strong>Pending Review</strong> — 4 absence documents pending review.
-              </Alert>
-            </Box>
+            {leaveRequests.fraudCases === 0 && leaveRequests.pendingLeave === 0 && leaveRequests.pendingDocuments === 0 && (
+              <Box my={3}>
+                <Alert severity="success" sx={{ fontSize: "16px" }}>
+                  <strong>All Clear</strong> — No pending items at this time.
+                </Alert>
+              </Box>
+            )}
           </>
         )}
 
@@ -290,10 +379,10 @@ export default function Overview() {
                     Total Classes
                   </Typography>
                   <Typography variant="h5" fontWeight="bold">
-                    {userClasses.length}
+                    {attendanceStats.loading ? <CircularProgress size={24} /> : attendanceStats.totalClasses}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Active classes today
+                    Active classes 
                   </Typography>
                 </CardContent>
               </Card>
@@ -311,7 +400,7 @@ export default function Overview() {
                     Average Attendance
                   </Typography>
                   <Typography variant="h5" fontWeight="bold">
-                    70.2%
+                    {attendanceStats.loading ? <CircularProgress size={24} /> : `${attendanceStats.averageAttendance}%`}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Across all classes
@@ -332,7 +421,7 @@ export default function Overview() {
                     Classes Below 60%
                   </Typography>
                   <Typography variant="h5" fontWeight="bold">
-                    8
+                    {attendanceStats.loading ? <CircularProgress size={24} /> : attendanceStats.classesBelow60}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
                     Require attention

@@ -1,30 +1,41 @@
-import React from "react";
-import { Card, CardContent, CardHeader, Typography, Box } from "@mui/material";
+import React, { useState } from "react";
+import { 
+  Card, CardContent, CardHeader, Typography, Box, 
+  Tabs, Tab, Chip 
+} from "@mui/material";
 import GroupIcon from "@mui/icons-material/Group";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 
-export default function AttendanceStats({ classData, presentCount = 0, absentCount = 0 }) {
-  
+export default function AttendanceStats({ 
+  classData, 
+  presentCount = 0, 
+  absentCount = 0,
+  excusedCount = 0,
+  flaggedCount = 0 
+}) {
+
   // Add loading check
- if (!classData) {
-   return (
-     <Box display="flex" gap={2} width="100%">
-       {[1, 2, 3].map((i) => (
-         <Card key={i} sx={{ flex: 1, background: "#ffffff" }}>
-           <CardContent>
-             <Typography variant="h5">-</Typography>
-             <Typography variant="caption">Loading...</Typography>
-           </CardContent>
-         </Card>
-       ))}
-     </Box>
-   );
- }
+  if (!classData) {
+    return (
+      <Box display="flex" gap={2} width="100%">
+        {[1, 2, 3].map((i) => (
+          <Card key={i} sx={{ flex: 1, background: "#ffffff" }}>
+            <CardContent>
+              <Typography variant="h5">-</Typography>
+              <Typography variant="caption">Loading...</Typography>
+            </CardContent>
+          </Card>
+        ))}
+      </Box>
+    );
+  }
 
   const total = Array.isArray(classData?.students) ? classData.students.length : 0;
   const attendanceRate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
   const absenceRate = total > 0 ? Math.round((absentCount / total) * 100) : 0;
+  const excusedRate = total > 0 ? Math.round((excusedCount / total) * 100) : 0;
+  const flaggedRate = total > 0 ? Math.round((flaggedCount / total) * 100) : 0;
 
   const cardSx = {
     flex: 1,
@@ -50,11 +61,11 @@ export default function AttendanceStats({ classData, presentCount = 0, absentCou
       <Card sx={cardSx}>
         <CardHeader
           title={<Typography fontSize={14} color="text.secondary">Present Today</Typography>}
-          action={<CheckCircleIcon sx={{ fontSize: 20, color: "text.secondary" }} />}
+          action={<CheckCircleIcon sx={{ fontSize: 20, color: "success.main" }} />}
           sx={{ pb: 0 }}
         />
         <CardContent>
-          <Typography variant="h5" fontWeight="bold">{presentCount}</Typography>
+          <Typography variant="h5" fontWeight="bold" color="success.main">{presentCount}</Typography>
           <Typography variant="caption" color="text.secondary">{attendanceRate}% attendance rate</Typography>
         </CardContent>
       </Card>
@@ -62,11 +73,11 @@ export default function AttendanceStats({ classData, presentCount = 0, absentCou
       <Card sx={cardSx}>
         <CardHeader
           title={<Typography fontSize={14} color="text.secondary">Absent Today</Typography>}
-          action={<CancelIcon sx={{ fontSize: 20, color: "text.secondary" }} />}
+          action={<CancelIcon sx={{ fontSize: 20, color: "error.main" }} />}
           sx={{ pb: 0 }}
         />
         <CardContent>
-          <Typography variant="h5" fontWeight="bold">{absentCount}</Typography>
+          <Typography variant="h5" fontWeight="bold" color="error.main">{absentCount}</Typography>
           <Typography variant="caption" color="text.secondary">{absenceRate}% absence rate</Typography>
         </CardContent>
       </Card>

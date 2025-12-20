@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Table,
   TableBody,
@@ -6,7 +6,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   Button,
   Dialog,
   DialogTitle,
@@ -14,93 +13,306 @@ import {
   DialogActions,
   Typography,
   Chip,
-  Grid,
   Box,
+  Tabs,
+  Tab,
+  Snackbar,
+  Alert,
+  Paper,
+  CircularProgress
 } from "@mui/material";
 import {
   Visibility,
-  Download,
   CheckCircle,
   Cancel,
-  InsertDriveFile,
 } from "@mui/icons-material";
+import supabase from "../config/supabaseClient";
+import ViewDetailsButton from "./ViewDetailsButton";
 
-const submissionData = [
-  // ...existing sample data...
-  {
-    id: 1,
-    student: "Emma Johnson",
-    studentId: "S12346",
-    course: "BIO202",
-    date: "Apr 11, 2023",
-    submissionDate: "Apr 11, 2023",
-    reason: "Illness - Fever",
-    status: "Under Review",
-    documentUrl: "#",
-  },
-  {
-    id: 2,
-    student: "Sarah Davis",
-    studentId: "S12348",
-    course: "ENG101",
-    date: "Apr 11, 2023",
-    submissionDate: "Apr 11, 2023",
-    reason: "Illness - Migraine",
-    status: "Approved",
-    documentUrl: "#",
-  },
-  {
-    id: 3,
-    student: "Jennifer Lee",
-    studentId: "S12350",
-    course: "CHEM101",
-    date: "Apr 10, 2023",
-    submissionDate: "Apr 10, 2023",
-    reason: "Family Emergency",
-    status: "Rejected",
-    documentUrl: "#",
-  },
-  {
-    id: 4,
-    student: "Lisa Anderson",
-    studentId: "S12352",
-    course: "ART101",
-    date: "Apr 10, 2023",
-    submissionDate: "Apr 10, 2023",
-    reason: "Illness - Flu",
-    status: "Under Review",
-    documentUrl: "#",
-  },
-  {
-    id: 5,
-    student: "James Wilson",
-    studentId: "S12353",
-    course: "PHYS101",
-    date: "Apr 9, 2023",
-    submissionDate: "Apr 10, 2023",
-    reason: "Transportation Issues",
-    status: "Under Review",
-    documentUrl: "#",
-  },
-];
-
-export default function MCSubmissions() {
-  const [submissions, setSubmissions] = useState(submissionData);
+export default function MCSubmissions({ onChanged }) {
+  const [submissions, setSubmissions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [tabValue, setTabValue] = useState(0);
+  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
 
-  const handleApprove = (id) => {
-    setSubmissions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: "Approved" } : s))
-    );
-    setDialogOpen(false);
+  const formatDate = (d) => {
+    if (!d) return "";
+    const date = new Date(d);
+    if (Number.isNaN(date.getTime())) return String(d);
+    return date.toLocaleDateString();
   };
 
-  const handleReject = (id) => {
-    setSubmissions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: "Rejected" } : s))
-    );
-    setDialogOpen(false);
+  const formatDateTime = (d) => {
+    if (!d) return "";
+    const date = new Date(d);
+    if (Number.isNaN(date.getTime())) return String(d);
+    return date.toLocaleString();
+  };
+
+  const displayStatus = (raw) => {
+    switch (raw) {
+      case "approved":
+        return "Approved";
+      case "rejected":
+        return "Rejected";
+      case "pending_review":
+      default:
+        return "Under Review";
+    }
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        const user = JSON.parse(sessionStorage.getItem("user") || "null");
+        if (!user?.id) {
+          setSubmissions([]);
+          setLoading(false);
+          return;
+        }
+
+        // 1) Fetch lecturer's lecture and tutorial course IDs
+        const [lectureRes, tutorialRes] = await Promise.all([
+          supabase
+            .from("course_lecture")
+            .select("id, course_code, course_title")
+            .eq("lecturer_id", user.id),
+          supabase
+            .from("course_tutorial")
+            .select("id, course_code, course_title")
+            .eq("lecturer_id", user.id)
+        ]);
+
+        if (lectureRes.error) throw lectureRes.error;
+        if (tutorialRes.error) throw tutorialRes.error;
+
+        const lectureIds = lectureRes.data?.map(c => c.id) || [];
+        const tutorialIds = tutorialRes.data?.map(c => c.id) || [];
+        const courseMeta = {};
+        lectureRes.data?.forEach(c => { courseMeta[`L-${c.id}`] = { code: c.course_code, title: c.course_title }; });
+        tutorialRes.data?.forEach(c => { courseMeta[`T-${c.id}`] = { code: c.course_code, title: c.course_title }; });
+
+        if (lectureIds.length === 0 && tutorialIds.length === 0) {
+          setSubmissions([]);
+          setLoading(false);
+          return;
+        }
+
+        // 2) Fetch sessions for those courses
+        const orFilters = [];
+        if (lectureIds.length > 0) orFilters.push(`course_lecture_id.in.(${lectureIds.join(',')})`);
+        if (tutorialIds.length > 0) orFilters.push(`course_tutorial_id.in.(${tutorialIds.join(',')})`);
+
+        let sessionQuery = supabase
+          .from("attendance_session")
+          .select("id, course_lecture_id, course_tutorial_id, date");
+        if (orFilters.length > 0) sessionQuery = sessionQuery.or(orFilters.join(','));
+        const { data: sessions, error: sessionsError } = await sessionQuery;
+        if (sessionsError) throw sessionsError;
+
+        if (!sessions || sessions.length === 0) {
+          setSubmissions([]);
+          setLoading(false);
+          return;
+        }
+
+        const sessionIds = sessions.map(s => s.id);
+        const sessionLookup = new Map(
+          sessions.map(s => [s.id, {
+            type: s.course_lecture_id ? 'L' : 'T',
+            courseId: s.course_lecture_id || s.course_tutorial_id,
+            date: s.date
+          }])
+        );
+
+        // 3) Fetch MC submissions for those sessions
+        const { data: mcRows, error: mcError } = await supabase
+          .from("mc_submissions")
+          .select("id, student_id, session_id, absence_date, reason, status, submitted_at, document_url")
+          .in("session_id", sessionIds);
+        if (mcError) throw mcError;
+
+        // 4) Build enrollment name lookup to resolve student names per course
+        let allEnrollments = [];
+        if (lectureIds.length > 0) {
+          const { data: lecEnroll, error: lecEnrollErr } = await supabase
+            .from("enrollment_lecture")
+            .select("student_id, course_id, users(name)")
+            .in("course_id", lectureIds);
+          if (lecEnrollErr) throw lecEnrollErr;
+          allEnrollments = [
+            ...allEnrollments,
+            ...(lecEnroll || []).map(e => ({ key: `L-${e.course_id}-${e.student_id}`, name: e.users?.name || null }))
+          ];
+        }
+        if (tutorialIds.length > 0) {
+          const { data: tutEnroll, error: tutEnrollErr } = await supabase
+            .from("enrollment_tutorial")
+            .select("student_id, tutorial_id, users(name)")
+            .in("tutorial_id", tutorialIds);
+          if (tutEnrollErr) throw tutEnrollErr;
+          allEnrollments = [
+            ...allEnrollments,
+            ...(tutEnroll || []).map(e => ({ key: `T-${e.tutorial_id}-${e.student_id}`, name: e.users?.name || null }))
+          ];
+        }
+        const nameMap = new Map(allEnrollments.map(e => [e.key, e.name]));
+
+        // 5) Transform rows for table
+        const rows = (mcRows || []).map(r => {
+          const sess = sessionLookup.get(r.session_id);
+          const courseKey = sess ? `${sess.type}-${sess.courseId}` : null;
+          const courseInfo = courseKey ? courseMeta[courseKey] : null;
+          const nameKey = sess ? `${sess.type}-${sess.courseId}-${r.student_id}` : null;
+          const studentName = nameKey ? (nameMap.get(nameKey) || null) : null;
+          return {
+            id: r.id,
+            student: studentName || r.student_id,
+            studentId: r.student_id,
+            course: courseInfo?.code || courseInfo?.title || "Course",
+            date: formatDate(r.absence_date || sess?.date),
+            submissionDate: formatDateTime(r.submitted_at),
+            reason: r.reason || "",
+            status: displayStatus(r.status),
+            documentUrl: r.document_url || null,
+            _rawStatus: r.status,
+            sessionId: r.session_id,
+            enrollmentType: sess?.type === 'L' ? 'lecture' : 'tutorial',
+            courseId: sess?.courseId || null
+          };
+        });
+
+        setSubmissions(rows);
+      } catch (err) {
+        console.error("Error loading MC submissions:", err);
+        setSubmissions([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  const handleApprove = async (id) => {
+    try {
+      // Get the submission details to extract session_id and student_id
+      const submission = submissions.find(s => s.id === id);
+      if (!submission) {
+        console.error('Submission not found');
+        setSnackbar({ open: true, message: "Submission not found", severity: "error" });
+        return;
+      }
+
+      // Update mc_submissions status to approved
+      const { error: updateError } = await supabase
+        .from('mc_submissions')
+        .update({ status: 'approved' })
+        .eq('id', id);
+      if (updateError) {
+        console.error('Update error:', updateError);
+        const errorMsg = updateError.message || updateError.code || 'Unknown error';
+        console.error('Full error details:', JSON.stringify(updateError));
+        throw new Error(`Failed to update mc_submissions: ${errorMsg}`);
+      }
+
+      console.log('MC submission approved successfully');
+
+      // Extract enrollment info from submission
+      const sessionId = submission.sessionId;
+      const studentId = submission.studentId;
+      
+      // Determine if this is a lecture or tutorial enrollment
+      const isLecture = submission.enrollmentType === 'lecture';
+      
+      // Fetch the enrollment record to get the enrollment ID
+      let enrollmentId = null;
+      if (isLecture) {
+        const { data: enrollment, error: enrollError } = await supabase
+          .from('enrollment_lecture')
+          .select('id')
+          .eq('student_id', studentId)
+          .eq('course_id', submission.courseId)
+          .single();
+        if (enrollError) console.warn('Lecture enrollment fetch error:', enrollError);
+        enrollmentId = enrollment?.id;
+      } else {
+        const { data: enrollment, error: enrollError } = await supabase
+          .from('enrollment_tutorial')
+          .select('id')
+          .eq('student_id', studentId)
+          .eq('tutorial_id', submission.courseId)
+          .single();
+        if (enrollError) console.warn('Tutorial enrollment fetch error:', enrollError);
+        enrollmentId = enrollment?.id;
+      }
+
+      // Insert attendance_record with "excused" status if enrollment found
+      if (enrollmentId) {
+        const attendanceRecord = {
+          session_id: sessionId,
+          status: 'excused'
+        };
+        if (isLecture) {
+          attendanceRecord.lecture_enrollment_id = enrollmentId;
+        } else {
+          attendanceRecord.tutorial_enrollment_id = enrollmentId;
+        }
+
+        const { error: insertError } = await supabase
+          .from('attendance_record')
+          .insert([attendanceRecord]);
+        
+        if (insertError) {
+          console.warn('Failed to insert excused attendance record:', insertError);
+        } else {
+          console.log('Excused attendance record created successfully');
+        }
+      }
+
+      setSubmissions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "Approved" } : s)));
+      // Update selected submission if it's the one being approved
+      if (selectedSubmission?.id === id) {
+        setSelectedSubmission((prev) => (prev ? { ...prev, status: "Approved" } : null));
+      }
+      setSnackbar({ open: true, message: "MC submission approved successfully", severity: "success" });
+      // Notify parent to refresh Absence tab data
+      try { onChanged && onChanged(); } catch (e) { /* no-op */ }
+    } catch (e) {
+      console.error('Approve failed:', e);
+      setSnackbar({ open: true, message: `Failed to approve: ${e.message || 'Unknown error'}`, severity: "error" });
+    } finally {
+      setDialogOpen(false);
+    }
+  };
+
+  const handleReject = async (id) => {
+    try {
+      const { error } = await supabase
+        .from('mc_submissions')
+        .update({ status: 'rejected' })
+        .eq('id', id);
+      if (error) {
+        console.error('Reject error:', error);
+        throw error;
+      }
+      setSubmissions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "Rejected" } : s)));
+      // Update selected submission if it's the one being rejected
+      if (selectedSubmission?.id === id) {
+        setSelectedSubmission((prev) => (prev ? { ...prev, status: "Rejected" } : null));
+      }
+      setSnackbar({ open: true, message: "MC submission rejected successfully", severity: "success" });
+      // Notify parent to refresh Absence tab data
+      try { onChanged && onChanged(); } catch (e) { /* no-op */ }
+    } catch (e) {
+      console.error('Reject failed:', e);
+      setSnackbar({ open: true, message: `Failed to reject: ${e.message || 'Unknown error'}`, severity: "error" });
+    } finally {
+      setDialogOpen(false);
+    }
   };
 
   const getStatusChip = (status) => {
@@ -123,166 +335,184 @@ export default function MCSubmissions() {
     }
   };
 
-  return (
-    <>
-      <TableContainer
-        component={Paper}
-        sx={{
-          mt: 2,
-          background: "#ffffff",
-          border: "1px solid #e2e8f0",
-          borderRadius: 2,
-          boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
-          overflowX: "auto",       
-          width: "100%",          
-          boxSizing: "border-box",
-          m: 0,
-          p: 0,
-        }}
-      >
-        {/* table will fill the container; avoid forcing a large minWidth */}
-        <Table size="small" sx={{ width: "100%" }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Student
-                </Typography>
-              </TableCell>
-              <TableCell>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Course
-                </Typography>
-              </TableCell>
-              <TableCell>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Absence Date
-                </Typography>
-              </TableCell>
-              <TableCell>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Submission Date
-                </Typography>
-              </TableCell>
-              <TableCell>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Reason
-                </Typography>
-              </TableCell>
-              <TableCell>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Status
-                </Typography>
-              </TableCell>
-              <TableCell align="right" sx={{ width: 120 }}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Actions
-                </Typography>
-              </TableCell>
-            </TableRow>
-          </TableHead>
+  const handleViewDetails = (submission) => {
+    setSelectedSubmission(submission);
+    setTabValue(0);
+    setDialogOpen(true);
+  };
 
-          <TableBody>
-            {submissions.map((row) => (
-              <TableRow
-                key={row.id}
-                sx={{
-                  "&:hover": { backgroundColor: "#f8fafc" },
-                }}
-              >
-                <TableCell sx={{ maxWidth: 220 }}>
-                  <Typography fontWeight="bold" color="text.primary" noWrap>
-                    {row.student}
+  const rows = submissions;
+
+  return (
+    <Box p={2}>
+      {loading ? (
+        <Box display="flex" justifyContent="center" mt={4}><CircularProgress /></Box>
+      ) : (
+        <TableContainer
+          component={Paper}
+          sx={{
+            mt: 2,
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 2,
+            boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+            overflowX: "auto",
+            width: "100%",
+            boxSizing: "border-box",
+            m: 0,
+            p: 0,
+          }}
+        >
+          <Table size="small" sx={{ width: "100%" }}>
+            <TableHead>
+              <TableRow>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Student
                   </Typography>
-                  <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                    {row.studentId}
-                  </Typography>
-                </TableCell>
-                <TableCell sx={{ maxWidth: 160 }}>
-                  <Typography color="text.primary" noWrap>{row.course}</Typography>
                 </TableCell>
                 <TableCell>
-                  <Typography color="text.primary">{row.date}</Typography>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Course
+                  </Typography>
                 </TableCell>
                 <TableCell>
-                  <Typography color="text.primary">{row.submissionDate}</Typography>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Absence Date
+                  </Typography>
                 </TableCell>
-                <TableCell sx={{ maxWidth: 360 }}>
-                  <Typography color="text.primary" noWrap>{row.reason}</Typography>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Submission Date
+                  </Typography>
                 </TableCell>
-                <TableCell>{getStatusChip(row.status)}</TableCell>
-                <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<Visibility />}
-                    onClick={() => {
-                      setSelectedSubmission(row);
-                      setDialogOpen(true);
-                    }}
-                    sx={{
-                      borderColor: "#e6edf3",
-                      color: "#0f172a",
-                      "&:hover": { backgroundColor: "rgba(15,23,42,0.04)" },
-                      minWidth: 70,
-                      px: 1,
-                    }}
-                  >
-                    View
-                  </Button>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Reason
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Status
+                  </Typography>
+                </TableCell>
+                <TableCell align="right">
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Actions
+                  </Typography>
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} align="center">
+                    <Typography variant="body2" color="text.secondary">No MC submissions found.</Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.map((r) => (
+                  <TableRow
+                    key={r.id}
+                    sx={{ "&:hover": { backgroundColor: "#f8fafc" } }}
+                  >
+                    <TableCell sx={{ maxWidth: 220 }}>
+                      <Typography fontWeight="bold" color="text.primary" noWrap>
+                        {r.student}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 180 }}>
+                      <Typography color="text.primary" noWrap>{r.course}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography color="text.primary">{r.date}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography color="text.primary">{r.submissionDate}</Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 360 }}>
+                      <Typography color="text.primary" noWrap>{r.reason}</Typography>
+                    </TableCell>
+                    <TableCell>{getStatusChip(r.status)}</TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                      <ViewDetailsButton onClick={() => handleViewDetails(r)} />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>Review Absence Documentation</DialogTitle>
-        <DialogContent dividers sx={{ background: "#fafafa" }}>
+        <DialogTitle>Review Medical Certificate Submission</DialogTitle>
+        <DialogContent dividers>
           {selectedSubmission && (
             <>
-              <Typography variant="subtitle2" gutterBottom>
-                {selectedSubmission.student} ({selectedSubmission.studentId}) — {selectedSubmission.course}
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Typography variant="body2">Absence Date:</Typography>
-                  <Typography>{selectedSubmission.date}</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2">Submission Date:</Typography>
-                  <Typography>{selectedSubmission.submissionDate}</Typography>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="body2">Reason:</Typography>
-                  <Typography>{selectedSubmission.reason}</Typography>
-                </Grid>
-              </Grid>
+              <Tabs
+                value={tabValue}
+                onChange={(e, newValue) => setTabValue(newValue)}
+                sx={{ mb: 2 }}
+              >
+                <Tab label="Submission Details" />
+                <Tab label="Document" />
+              </Tabs>
 
-              <Box mt={3} p={2} sx={{ border: "1px solid #e6edf3", borderRadius: 2, background: "#fff" }}>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                  <Typography variant="body2" fontWeight="bold">
-                    Document Preview
-                  </Typography>
-                  <Button variant="outlined" size="small" startIcon={<Download />} sx={{ borderColor: "#e6edf3", color: "#0f172a" }}>
-                    Download
-                  </Button>
-                </Box>
-                <Box
-                  height={200}
-                  display="flex"
-                  alignItems="center"
-                  justifyContent="center"
-                  bgcolor="#f5f7fb"
-                  borderRadius={1}
-                >
-                  <Box textAlign="center">
-                    <InsertDriveFile fontSize="large" />
-                    <Typography variant="body2">Document preview would appear here</Typography>
+              {tabValue === 0 && (
+                <Box mt={2}>
+                  <Typography><strong>Student:</strong> {selectedSubmission.student}</Typography>
+                  <Typography><strong>Student ID:</strong> {selectedSubmission.studentId}</Typography>
+                  <Typography><strong>Course:</strong> {selectedSubmission.course}</Typography>
+                  <Typography mt={2}><strong>Absence Date:</strong> {selectedSubmission.date}</Typography>
+                  <Typography><strong>Submission Date:</strong> {selectedSubmission.submissionDate}</Typography>
+                  <Box display="flex" alignItems="center" gap={1} mt={1}>
+                    <Typography><strong>Status:</strong></Typography>
+                    {getStatusChip(selectedSubmission.status)}
                   </Box>
+                  <Typography mt={2}><strong>Reason:</strong> {selectedSubmission.reason}</Typography>
                 </Box>
-              </Box>
+              )}
+
+              {tabValue === 1 && (
+                <Box mt={2}>
+                  {selectedSubmission?.documentUrl ? (
+                    <Box>
+                      <Box
+                        display="flex"
+                        justifyContent="space-between"
+                        alignItems="center"
+                        border={1}
+                        borderRadius={1}
+                        p={2}
+                        mb={2}
+                        sx={{ borderColor: "#e6edf3" }}
+                      >
+                        <Box>
+                          <Typography fontWeight="bold">Medical Certificate / Absence Letter</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Submitted on {selectedSubmission.submissionDate}
+                          </Typography>
+                        </Box>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<Visibility />}
+                          sx={{ borderColor: "#e6edf3", color: "#0f172a" }}
+                          component="a"
+                          href={selectedSubmission.documentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          View
+                        </Button>
+                      </Box>
+                    </Box>
+                  ) : (
+                    <Typography color="text.secondary">No document provided.</Typography>
+                  )}
+                </Box>
+              )}
             </>
           )}
         </DialogContent>
@@ -310,6 +540,12 @@ export default function MCSubmissions() {
           </Button>
         </DialogActions>
       </Dialog>
-    </>
+
+      <Snackbar open={snackbar.open} autoHideDuration={3000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 }

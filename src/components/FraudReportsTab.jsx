@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -16,43 +16,63 @@ import {
   Alert,
   Box,
   Paper,
+  CircularProgress,
 } from "@mui/material";
 import MailIcon from "@mui/icons-material/Mail";
 import EditIcon from "@mui/icons-material/Edit";
+import supabase from "../config/supabaseClient";
 
 export default function FraudReportsTab() {
-  const [snackbar, setSnackbar] = React.useState({ open: false, message: "", severity: "success" });
+  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [usersMap, setUsersMap] = useState({});
 
-  const handleUpdateAttendance = (name) => {
-    setSnackbar({ open: true, message: `Simulated attendance update for ${name}.`, severity: "success" });
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      setLoading(true);
+      try {
+        const { data: issues, error } = await supabase
+          .from("attendance_issues")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        setRows(issues || []);
+
+        const userIds = [...new Set((issues || []).map((i) => i.user_id))];
+        if (userIds.length) {
+          const { data: users, error: usersError } = await supabase
+            .from("users")
+            .select("id, name")
+            .in("id", userIds);
+
+          if (!usersError && users) {
+            const map = {};
+            users.forEach((u) => (map[u.id] = u));
+            setUsersMap(map);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching fraud reports", err);
+        setRows([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAlerts();
+  }, []);
+
+  const handleUpdateAttendance = async (rowId, studentName) => {
+    try {
+      await supabase.from("attendance_issues").update({ status: "resolved" }).eq("id", rowId);
+      setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, status: "resolved" } : r)));
+      setSnackbar({ open: true, message: `Marked resolved for ${studentName}.`, severity: "success" });
+    } catch (err) {
+      setSnackbar({ open: true, message: err.message || "Failed to update", severity: "error" });
+    }
   };
-
-  const fraudData = [
-    {
-      id: "F001",
-      studentName: "Alice Johnson",
-      class: "Mathematics I",
-      type: "Late Check-in",
-      timestamp: "2025-06-10 09:15 AM",
-      status: "Flagged",
-    },
-    {
-      id: "F002",
-      studentName: "Bob Williams",
-      class: "Physics II",
-      type: "Location Mismatch",
-      timestamp: "2025-06-09 10:05 AM",
-      status: "Flagged",
-    },
-    {
-      id: "F003",
-      studentName: "Charlie Brown",
-      class: "Computer Science Fundamentals",
-      type: "Late Check-in ",
-      timestamp: "2025-06-12 11:00 AM",
-      status: "Flagged",
-    },
-  ];
 
   return (
     <>
@@ -76,39 +96,55 @@ export default function FraudReportsTab() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {fraudData.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>{row.studentName}</TableCell>
-                    <TableCell>{row.class}</TableCell>
-                    <TableCell>{row.type}</TableCell>
-                    <TableCell>{row.timestamp}</TableCell>
-                    <TableCell>
-                      <Chip
-                        label={row.status}
-                        color={row.status === "Tardy" ? "warning" : "error"}
-                        size="small"
-                      />
-                    </TableCell>
-                    <TableCell align="right">
-                      <Box display="flex" justifyContent="flex-end" gap={1}>
-                        <Button
-                          variant="contained"
-                          size="small"
-                          startIcon={<EditIcon />}
-                          onClick={() => handleUpdateAttendance(row.studentName)}
-                          sx={{
-                            backgroundColor: "#ffffff",
-                            color: "#0f172a",
-                            textTransform: "none",
-                            "&:hover": { backgroundColor: "#f3f4f6" },
-                          }}
-                        >
-                          Update
-                        </Button>
-                      </Box>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                      <CircularProgress size={20} />
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
+                      <Typography color="text.secondary">No fraud alerts found.</Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  rows.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>{usersMap[row.user_id]?.name || "Unknown"}</TableCell>
+                      <TableCell>{row.course_code || row.session_id || "-"}</TableCell>
+                      <TableCell>{row.issue_type}</TableCell>
+                      <TableCell>{row.created_at?.replace("T", " ")?.slice(0, 16) || "-"}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={row.status || "Flagged"}
+                          color={(row.status || "").toLowerCase() === "resolved" ? "success" : "error"}
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box display="flex" justifyContent="flex-end" gap={1}>
+                          {((row.status || "").toLowerCase() !== "resolved") && (
+                            <Button
+                              variant="contained"
+                              size="small"
+                              startIcon={<EditIcon />}
+                              onClick={() => handleUpdateAttendance(row.id, usersMap[row.user_id]?.name || "student")}
+                              sx={{
+                                backgroundColor: "#ffffff",
+                                color: "#0f172a",
+                                textTransform: "none",
+                                "&:hover": { backgroundColor: "#f3f4f6" },
+                              }}
+                            >
+                              Resolve
+                            </Button>
+                          )}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </TableContainer>

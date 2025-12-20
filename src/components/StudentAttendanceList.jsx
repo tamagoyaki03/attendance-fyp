@@ -1,128 +1,38 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
 import {
   Table, TableBody, TableCell, TableHead, TableContainer, TableRow, Paper,
-  Button, TextField, InputAdornment, Chip, CircularProgress, Box, Typography
+  Button, TextField, InputAdornment, Chip, Box, Typography,
+  FormControl, InputLabel, Select, MenuItem
 } from "@mui/material";
-import { Search as SearchIcon } from "@mui/icons-material";
-import supabase from "../config/supabaseClient";
+import { 
+  Search as SearchIcon, 
+  Flag as FlagIcon, 
+  EventNote as ExcuseIcon 
+} from "@mui/icons-material";
+import ViewDetailsButton from "./ViewDetailsButton";
 
-export default function StudentAttendanceList({ classData = {} }) {
-  const {
-    statusFilter = "all",
-    onSelectStudent,
-    classAttendanceId
-  } = classData;
+export default function StudentAttendanceList({ classData, onSelectStudent }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [tabValue, setTabValue] = useState(0); 
+  
+  // Get students from classData (passed from parent)
+  const students = classData?.students || [];
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [students, setStudents]   = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [error,   setError]       = useState(null);
+  const filteredStudents = students.filter(student => {
+    const studentName = student.name || '';
+    const studentEmail = student.email || '';
+    const studentId = student.student_id || '';
+    const studentStatus = student.status || '';
 
-  const fetchStudents = useCallback(async () => {
-    if (!classAttendanceId) return;
-    try {
-      setLoading(true);
-      setError(null);
+    const matchesSearch = searchTerm === '' || 
+      studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      studentEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      studentId.toString().toLowerCase().includes(searchTerm.toLowerCase());
 
-      const { data: session, error: sessionError } = await supabase
-        .from("attendance_session")
-        .select("id, course_lecture_id")
-        .eq("id", classAttendanceId)
-        .single();
+    const matchesStatus = statusFilter === 'all' || 
+      studentStatus.toLowerCase() === statusFilter.toLowerCase();
 
-      if (sessionError || !session) throw new Error("Session not found");
-
-      const { data: enrollments, error: enrollError } = await supabase
-        .from("enrollment_lecture")
-        .select(`
-          id,
-          student_id,
-          users ( id, name )
-        `)
-        .eq("course_id", session.course_lecture_id);
-
-      if (enrollError) throw enrollError;
-
-      const { data: attendanceRecords, error: arError } = await supabase
-        .from("attendance_record")
-        .select("*")
-        .eq("session_id", session.id);
-
-      if (arError) throw arError;
-
-      const recordsMap = new Map();
-      attendanceRecords?.forEach((record) => {
-        recordsMap.set(record.lecture_enrollment_id, record);
-      });
-
-      const mappedStudents = enrollments.map((enroll) => {
-        const record = recordsMap.get(enroll.id);
-        return {
-          id: enroll.id,
-          studentId: enroll.student_id,
-          name: enroll.users?.name ?? "Unknown",
-          status: record?.status ?? "absent",
-          checkInTime: record?.created_at ?? null,
-          checkInLocation: record?.latitude && record?.longitude
-            ? { lat: record.latitude, lng: record.longitude }
-            : null,
-        };
-      });
-
-      setStudents(mappedStudents);
-    } catch (err) {
-      console.error(err);
-      setError("Could not load attendance data.");
-    } finally {
-      setLoading(false);
-    }
-  }, [classAttendanceId]);
-
-  useEffect(() => {
-    fetchStudents();
-    const interval = setInterval(fetchStudents, 10000);
-    return () => clearInterval(interval);
-  }, [fetchStudents]);
-
-  useEffect(() => {
-    if (!classData?.id) return;
-    
-    let isMounted = true;
-    const fetchStudents = async () => {
-      try {
-        // Determine table and field based on class type
-        const enrollmentTable = classData.type === "Tutorial" ? "enrollment_tutorial" : "enrollment_lecture";
-        const enrollIdField = classData.type === "Tutorial" ? "tutorial_id" : "course_id";
-
-        const { data: enrollments, error } = await supabase
-          .from(enrollmentTable)
-          .select("id, student_id, users(id, name)")
-          .eq(enrollIdField, classData.id);
-
-        if (error) throw error;
-
-        if (isMounted) {
-          setStudents(enrollments || []);
-        }
-      } catch (error) {
-        console.error("Error fetching students:", error);
-        if (isMounted) setStudents([]);
-      }
-    };
-    fetchStudents();
-    return () => { isMounted = false; };
-  }, [classData?.id, classData?.type]);
-
-  const filteredStudents = students.filter((student) => {
-    const matchesSearch =
-      student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      student.studentId.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilter === "present" && student.status === "present") ||
-      (statusFilter === "absent" && student.status === "absent") ||
-      (statusFilter === "excused" && student.status === "excused") ||
-      (statusFilter === "flagged" && student.status === "flagged");
     return matchesSearch && matchesStatus;
   });
 
@@ -139,32 +49,15 @@ export default function StudentAttendanceList({ classData = {} }) {
     }
   };
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="200px">
-        <CircularProgress />
-        <Typography variant="body1" sx={{ ml: 2 }}>Loading attendance data...</Typography>
-      </Box>
-    );
-  }
-
-  if (error) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="200px">
-        <Typography color="error">{error}</Typography>
-      </Box>
-    );
-  }
-
   return (
-    <Box display="flex" flexDirection="column" gap={2}>
-      <Box display="flex" alignItems="center" mt={1}>
+    <div>
+      <Box mb={2} display="flex" gap={2}>
         <TextField
-          fullWidth
           placeholder="Search students..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
           size="small"
+          fullWidth
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -172,12 +65,19 @@ export default function StudentAttendanceList({ classData = {} }) {
               </InputAdornment>
             ),
           }}
-          sx={{
-            backgroundColor: "#ffffff",
-            borderRadius: 1,
-            "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
-          }}
         />
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <InputLabel>Status</InputLabel>
+          <Select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            label="Status"
+          >
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="present">Present</MenuItem>
+            <MenuItem value="absent">Absent</MenuItem>
+          </Select>
+        </FormControl>
       </Box>
 
       <TableContainer component={Paper} sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "none" }}>
@@ -192,37 +92,86 @@ export default function StudentAttendanceList({ classData = {} }) {
             </TableRow>
           </TableHead>
 
-          <TableBody>
-            {filteredStudents.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} style={{ height: 96, textAlign: "center" }}>
-                  No students found matching your criteria.
+        <TableBody>
+          {filteredStudents.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={tabValue === 0 ? 5 : 6} style={{ height: 96, textAlign: "center" }}>
+                {tabValue === 1 ? "No excused students found." : 
+                tabValue === 2 ? "No flagged students found." : 
+                "No students found matching your criteria."}
+              </TableCell>
+            </TableRow>
+          ) : (
+            filteredStudents.map((student, index) => (
+              <TableRow key={student.id || index}>
+                <TableCell>
+                  <Typography fontWeight={500}>{student.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {student.email}
+                  </Typography>
+                </TableCell>
+                <TableCell>{student.student_id}</TableCell>
+                <TableCell>{getStatusBadge(student.status, student)}</TableCell>
+                <TableCell>
+                  {student.checkInTime ? new Date(student.checkInTime).toLocaleTimeString() : "N/A"}
+                </TableCell>
+                
+                {/* Excuse Reason Column (only show in Excused tab) */}
+                {tabValue === 1 && (
+                  <TableCell>
+                    <Typography variant="body2">
+                      {student.excuse_reason || "Medical excuse"}
+                    </Typography>
+                  </TableCell>
+                )}
+                
+                {/* Flag Reason Column (only show in Flagged tab) */}
+                {tabValue === 2 && (
+                  <TableCell>
+                    <Typography variant="body2" color="error">
+                      {student.flag_reason || "Attendance pattern concern"}
+                    </Typography>
+                  </TableCell>
+                )}
+                
+                <TableCell align="right">
+                  <Box display="flex" gap={1} justifyContent="flex-end">
+                    {/* Show different actions based on current tab and student status */}
+                    {tabValue === 0 && (
+                      <>
+                        {!(student.isExcused || student.excuse_reason) && (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            color="info"
+                            onClick={() => handleExcuseStudent(student)}
+                            startIcon={<ExcuseIcon />}
+                          >
+                            Excuse
+                          </Button>
+                        )}
+                        {!(student.isFlagged || student.flag_reason) && (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            color="warning"
+                            onClick={() => handleFlagStudent(student)}
+                            startIcon={<FlagIcon />}
+                          >
+                            Flag
+                          </Button>
+                        )}
+                      </>
+                    )}   
+                    <ViewDetailsButton onClick={() => onSelectStudent(student)} />
+                  </Box>
                 </TableCell>
               </TableRow>
-            ) : (
-              filteredStudents.map((student) => (
-                <TableRow key={student.id}>
-                  <TableCell>
-                    <Typography fontWeight={500}>{student.name}</Typography>
-                  </TableCell>
-                  <TableCell>{student.studentId}</TableCell>
-                  <TableCell>{getStatusBadge(student.status)}</TableCell>
-                  <TableCell>{student.checkInTime ? new Date(student.checkInTime).toLocaleTimeString() : "N/A"}</TableCell>
-                  <TableCell align="right">
-                    <Button
-                      variant="text"
-                      size="small"
-                      onClick={() => onSelectStudent(student)}
-                    >
-                      View Details
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
+            ))
+          )}
+        </TableBody>
         </Table>
       </TableContainer>
-    </Box>
+    </div>
   );
 }

@@ -11,9 +11,17 @@ import {
   TextField,
   MenuItem,
   Box,
+  IconButton,
+  Tooltip,
+  Alert,
+  CircularProgress,
+  Typography
 } from "@mui/material";
 import ScheduleInput from "../ScheduleInput";
 import StudentSearch from "./StudentSearch";
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import { getCurrentLocation, geocodeAddress } from "../../utils/geolocationUtils";
 
 const DAY_TO_NUMBER = {
   Monday: 1,
@@ -23,8 +31,11 @@ const DAY_TO_NUMBER = {
   Friday: 5,
 };
 
-export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
+export default function AddClassDialog({ open, onClose, onClassAdded }) {
   const [isLoading, setIsLoading] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [locationStatus, setLocationStatus] = useState('');
+  const [validationErrors, setValidationErrors] = useState({});
   const [formData, setFormData] = useState({
     code: "",
     name: "",
@@ -36,6 +47,8 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
     end_date: null,
     students: [],
     location: "",
+    latitude: null,
+    longitude: null,
     type: "",
     parentCourseId: "", // link tutorial to a lecture
   });
@@ -55,6 +68,69 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
     fetchCourses();
   }, []);
 
+  const handleGetCurrentLocation = async () => {
+    if (formData.location.toLowerCase() === 'online') {
+      setLocationStatus('Location not needed for online classes');
+      setTimeout(() => setLocationStatus(''), 3000);
+      return;
+    }
+
+    setIsGettingLocation(true);
+    setLocationStatus('Getting your current location...');
+
+    try {
+      const location = await getCurrentLocation();
+      setFormData(prev => ({
+       ...prev,
+       latitude: location.latitude,
+       longitude: location.longitude,
+       location: prev.location || `Lat: ${location.latitude.toFixed(6)}, Lng: ${location.longitude.toFixed(6)}`
+     }));
+     setLocationStatus('Current location obtained successfully!');
+     setTimeout(() => setLocationStatus(''), 3000);
+   } catch (error) {
+     console.error('Error getting location:', error);
+     setLocationStatus(`Error: ${error.message}`);
+     setTimeout(() => setLocationStatus(''), 5000);
+   } finally {
+     setIsGettingLocation(false);
+   }
+};
+ 
+const handleGeocodeLocation = async () => {
+  if (formData.location.toLowerCase() === 'online') {
+    setLocationStatus('Location not needed for online classes');
+    setTimeout(() => setLocationStatus(''), 3000);
+    return;
+  }
+
+  if (!formData.location.trim()) {
+    setLocationStatus('Please enter a location first');
+    setTimeout(() => setLocationStatus(''), 3000);
+    return;
+  }
+
+  setIsGettingLocation(true);
+  setLocationStatus('Getting coordinates for the location...');
+
+  try {
+    const result = await geocodeAddress(formData.location);
+    setFormData(prev => ({
+      ...prev,
+      latitude: result.latitude,
+      longitude: result.longitude
+    }));
+    setLocationStatus('Location coordinates found!');
+    setTimeout(() => setLocationStatus(''), 3000);
+  } catch (error) {
+    console.error('Error geocoding location:', error);
+    setLocationStatus('Could not find coordinates for this location');
+    setTimeout(() => setLocationStatus(''), 5000);
+  } finally {
+    setIsGettingLocation(false);
+  }
+};
+
   const inputSx = {
     "& .MuiOutlinedInput-root": {
       backgroundColor: "#ffffff",
@@ -67,12 +143,43 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
 
   const handleClose = () => {
     document.activeElement && document.activeElement.blur();
-    onOpenChange(false);
+    setLocationStatus('');
+    setValidationErrors({}); // Clear validation errors
+   
+   // Reset form data when canceling
+   setFormData({
+     code: "",
+     name: "",
+     lecturer: "",
+     day: "",
+     start_time: "",
+     end_time: "",
+     start_date: null,
+     end_date: null,
+     students: [],
+     location: "",
+     latitude: null,
+     longitude: null,
+     type: "",
+     parentCourseId: "",
+   });
+    if (typeof onClose === 'function') {
+      console.log("Calling onClose(false)");
+      onClose(false);
+    }
   };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+
+    if (name === 'location') {
+      if (value.toLowerCase() === 'online') {
+        setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+     } else {
+       setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+     }
+    }
   };
 
   const handleParentCourseChange = (e) => {
@@ -115,6 +222,8 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
           lecture_start_date: formData.start_date || null,
           lecture_end_date: formData.end_date || null,
           lecture_location: formData.location,
+          latitude: formData.location.toLowerCase() === 'online' ? null : formData.latitude,
+          longitude: formData.location.toLowerCase() === 'online' ? null : formData.longitude,
         };
       } else {
         courseTable = "course_tutorial";
@@ -135,6 +244,8 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
           tutorial_start_date: formData.start_date || null,
           tutorial_end_date: formData.end_date || null,
           tutorial_location: formData.location,
+          latitude: formData.location.toLowerCase() === 'online' ? null : formData.latitude,
+          longitude: formData.location.toLowerCase() === 'online' ? null : formData.longitude,
         };
       }
 
@@ -156,8 +267,9 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
         if (enrollmentError) throw enrollmentError;
       }
 
-      if (onClassAdded) onClassAdded();
-      handleClose();
+      if (typeof onClassAdded === 'function') {
+        onClassAdded();
+      }
       setFormData({
         code: "",
         name: "",
@@ -169,8 +281,18 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
         end_date: null,
         students: [],
         location: "",
+        latitude: null,
+        longitude: null,
         type: "",
       });
+
+      setLocationStatus('');
+
+     // Close the dialog
+     if (typeof onClose === 'function') {
+       onClose(false);
+     }
+
     } catch (error) {
       console.error("Error adding class:", error);
       alert("An error occurred while adding the class. Please try again.");
@@ -187,6 +309,12 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
         <DialogContentText sx={{ color: "text.secondary", mb: 2 }}>
           Enter the details for the new class. Click save when you're done.
         </DialogContentText>
+
+        {locationStatus && (
+          <Alert severity={locationStatus.includes('Error') ? 'error' : 'info'} sx={{ mb: 2 }}>
+            {locationStatus}
+          </Alert>
+        )}
 
         <form onSubmit={handleSubmit}>
           <Box display="grid" gap={2} gridTemplateColumns={{ xs: "1fr", md: "1fr 1fr" }}>
@@ -237,8 +365,52 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
               <InputLabel htmlFor="location" sx={{ mb: 1 }}>Location</InputLabel>
               <Box display="flex" gap={1}>
                 <TextField id="location" name="location" placeholder="e.g., Room 101" value={formData.location} onChange={handleInputChange} fullWidth sx={inputSx} />
-                <Button variant="outlined" onClick={() => setFormData(prev => ({ ...prev, location: "Online" }))}>Online</Button>
+                <Button 
+                 variant="outlined" 
+                 onClick={() => setFormData(prev => ({ 
+                   ...prev, 
+                   location: "Online", 
+                   latitude: null, 
+                   longitude: null 
+                 }))}
+               >
+                 Online
+               </Button>
+                <Tooltip title="Get coordinates for entered location">
+                  <IconButton
+                    onClick={handleGeocodeLocation}
+                    disabled={isGettingLocation || !formData.location.trim()|| formData.location.toLowerCase() === 'online'}
+                    color="primary"
+                  >
+                    {isGettingLocation ? <CircularProgress size={20} /> : <LocationOnIcon />}
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Use my current location">
+                 <IconButton
+                   onClick={handleGetCurrentLocation}
+                   disabled={isGettingLocation || formData.location.toLowerCase() === 'online'}
+                   color="secondary"
+                 >
+                   {isGettingLocation ? <CircularProgress size={20} /> : <MyLocationIcon />}
+                 </IconButton>
+               </Tooltip>
               </Box>
+             
+             {formData.latitude && formData.longitude && formData.location.toLowerCase() !== 'online' && (
+               <Box sx={{ mt: 1, p: 1, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
+                 <Typography variant="caption" color="text.secondary">
+                   Coordinates: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
+                 </Typography>
+               </Box>
+             )}
+
+             {formData.location.toLowerCase() === 'online' && (
+               <Box sx={{ mt: 1, p: 1, backgroundColor: '#e3f2fd', borderRadius: 1 }}>
+                 <Typography variant="caption" color="primary">
+                   📱 Online class - No location coordinates needed
+                 </Typography>
+               </Box>
+             )}
             </Box>
 
             <Box sx={{ gridColumn: "1 / -1" }}>
@@ -246,9 +418,28 @@ export default function AddClassDialog({ open, onOpenChange, onClassAdded }) {
             </Box>
           </Box>
 
-          <DialogActions sx={{ mt: 2, borderTop: "1px solid #e6edf3", pt: 2 }}>
-            <Button variant="outlined" onClick={handleClose}>Cancel</Button>
-            <Button type="submit" variant="contained" disabled={isLoading}>{isLoading ? "Adding..." : "Add Class"}</Button>
+          <DialogActions>
+            <Button 
+              variant="outlined" 
+              onClick={(e) => {
+                console.log("Cancel button clicked");
+                e.preventDefault();
+                e.stopPropagation();
+                handleClose();
+              }}
+              disabled={isLoading}
+              type="button"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSubmit}
+              variant="contained" 
+              disabled={isLoading || Object.keys(validationErrors).length > 0}
+              type="button"
+            >
+              {isLoading ? "Adding..." : "Add Class"}
+            </Button>
           </DialogActions>
         </form>
       </DialogContent>

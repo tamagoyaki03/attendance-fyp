@@ -32,7 +32,7 @@ const Button = ({
   return (
     <button
       type={type}
-      onClick={onClick}
+      onClick={typeof onClick === 'function' ? onClick : undefined}
       disabled={disabled}
       className={buttonClasses}
       {...props}

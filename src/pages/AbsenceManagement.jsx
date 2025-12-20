@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Box,
   Typography,
@@ -28,17 +28,36 @@ import LeaveRequestList from "../components/LeaveRequestList";
 import AbsenceTable from "../components/AbsenceTable";
 import supabase from "../config/supabaseClient";
 
+const DEFAULT_EMAIL_TEMPLATE = `Dear [Student Name],
+
+We have noticed that you were absent from [Course Code] - [Course Name] on [Absence Date].
+
+According to university policy, all absences must be documented with a valid Medical Certificate (MC) or Letter of Absence. Please submit your documentation within 7 days using the following link: [Submission Link].
+
+If you have any questions or need assistance, please contact the Student Affairs Office.
+
+Thank you,
+[University Name] Attendance Management System`;
+
 export default function AbsenceManagement() {
   const [activeTab, setActiveTab] = useState(0);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
   const [user, setUser] = useState(null);
   const [absenceStats, setAbsenceStats] = useState({
     totalAbsences: 0,
-    emailsSent: 0,
     mcSubmitted: 0,
     pendingReview: 0
   });
+  const [absences, setAbsences] = useState([]);
+  const [absencesLoading, setAbsencesLoading] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  
+  // Email settings state
+  const [emailSettings, setEmailSettings] = useState({
+    emailTemplate: DEFAULT_EMAIL_TEMPLATE
+  });
+  const [settingsLoading, setSettingsLoading] = useState(false);
 
   // Get user data
   useEffect(() => {
@@ -48,26 +67,51 @@ export default function AbsenceManagement() {
     }
   }, []);
 
-  // Fetch absence statistics
+  // Fetch email settings when user is loaded
   useEffect(() => {
     if (!user?.id) return;
-    fetchAbsenceStats();
+    
+    const fetchEmailSettings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('email_settings')
+          .select('*')
+          .eq('lecturer_id', user.id)
+          .single();
+
+        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+          console.error('Error fetching email settings:', error);
+          return;
+        }
+
+        if (data) {
+          setEmailSettings({
+            emailTemplate: data.email_template || DEFAULT_EMAIL_TEMPLATE
+          });
+        }
+      } catch (error) {
+        console.error('Error loading email settings:', error);
+      }
+    };
+
+    fetchEmailSettings();
   }, [user?.id]);
 
-  const fetchAbsenceStats = async () => {
+  const fetchAbsenceStats = useCallback(async () => {
     try {
       setLoading(true);
+      setAbsencesLoading(true);
       console.log("Fetching absence stats for lecturer:", user.id);
 
       // Get lecturer's courses (both lecture and tutorial)
       const [lectureRes, tutorialRes] = await Promise.all([
         supabase
           .from("course_lecture")
-          .select("id")
+          .select("id, course_code, course_title")
           .eq("lecturer_id", user.id),
         supabase
           .from("course_tutorial")
-          .select("id")
+          .select("id, course_code, course_title")
           .eq("lecturer_id", user.id)
       ]);
 
@@ -83,182 +127,268 @@ export default function AbsenceManagement() {
       if (lectureIds.length === 0 && tutorialIds.length === 0) {
         setAbsenceStats({
           totalAbsences: 0,
-          emailsSent: 0,
           mcSubmitted: 0,
           pendingReview: 0
         });
+        setAbsences([]);
+        setAbsencesLoading(false);
+        setLoading(false);
         return;
       }
 
-      // Get today's date for filtering
-      const today = new Date();
-      const todayString = today.toISOString().split('T')[0];
+      // Get all attendance sessions for these courses (all time)
+      const sessionFilters = [];
+      if (lectureIds.length > 0) sessionFilters.push(`course_lecture_id.in.(${lectureIds.join(',')})`);
+      if (tutorialIds.length > 0) sessionFilters.push(`course_tutorial_id.in.(${tutorialIds.join(',')})`);
 
-      // Get attendance sessions for today (or recent sessions)
-      const [lectureSessionsRes, tutorialSessionsRes] = await Promise.all([
-        lectureIds.length > 0 ? supabase
-          .from("attendance_session")
-          .select(`
-            id, 
-            course_lecture_id, 
-            created_at,
-            status
-          `)
-          .in("course_lecture_id", lectureIds)
-          .gte("created_at", todayString) // Today's sessions or later
-          .not("status", "is", null) // Only completed sessions
-        : { data: [], error: null },
-        
-        tutorialIds.length > 0 ? supabase
-          .from("attendance_session")
-          .select(`
-            id, 
-            course_tutorial_id, 
-            created_at,
-            status
-          `)
-          .in("course_tutorial_id", tutorialIds)
-          .gte("created_at", todayString) // Today's sessions or later
-          .not("status", "is", null) // Only completed sessions
-        : { data: [], error: null }
-      ]);
+      let sessionQuery = supabase
+        .from("attendance_session")
+        .select(`
+          id, 
+          course_lecture_id,
+          course_tutorial_id,
+          date,
+          start_time,
+          end_time,
+          created_at
+        `);
 
-      if (lectureSessionsRes.error) throw lectureSessionsRes.error;
-      if (tutorialSessionsRes.error) throw tutorialSessionsRes.error;
+      if (sessionFilters.length > 0) {
+        sessionQuery = sessionQuery.or(sessionFilters.join(','));
+      }
 
-      const lectureSessions = lectureSessionsRes.data || [];
-      const tutorialSessions = tutorialSessionsRes.data || [];
-      const allSessions = [...lectureSessions, ...tutorialSessions];
+      const { data: allSessions, error: sessionsError } = await sessionQuery;
+
+      if (sessionsError) throw sessionsError;
 
       console.log("Found today's attendance sessions:", allSessions);
 
-      if (allSessions.length === 0) {
+      if (!allSessions || allSessions.length === 0) {
         setAbsenceStats({
           totalAbsences: 0,
-          emailsSent: 0,
           mcSubmitted: 0,
           pendingReview: 0
         });
+        setAbsences([]);
+        setAbsencesLoading(false);
+        setLoading(false);
         return;
       }
 
       const sessionIds = allSessions.map(session => session.id);
 
       // Get all students enrolled in lecturer's courses
-      const [lectureEnrollmentsRes, tutorialEnrollmentsRes] = await Promise.all([
-        lectureIds.length > 0 ? supabase
+      let allEnrollments = [];
+      
+      if (lectureIds.length > 0) {
+        const { data: lectureEnrollments, error: lectureEnrollError } = await supabase
           .from("enrollment_lecture")
-          .select("user_id, course_id")
-          .in("course_id", lectureIds)
-        : { data: [], error: null },
-        
-        tutorialIds.length > 0 ? supabase
+          .select("id, student_id, course_id, users(name, email)")
+          .in("course_id", lectureIds);
+          
+        if (lectureEnrollError) throw lectureEnrollError;
+        allEnrollments = [...allEnrollments, ...lectureEnrollments.map(e => ({ ...e, enrollmentType: "lecture" }))];
+      }
+      
+      if (tutorialIds.length > 0) {
+        const { data: tutorialEnrollments, error: tutorialEnrollError } = await supabase
           .from("enrollment_tutorial")
-          .select("user_id, tutorial_id")
-          .in("tutorial_id", tutorialIds)
-        : { data: [], error: null }
-      ]);
+          .select("id, student_id, tutorial_id, users(name, email)")
+          .in("tutorial_id", tutorialIds);
+          
+        if (tutorialEnrollError) throw tutorialEnrollError;
+        allEnrollments = [
+          ...allEnrollments,
+          ...tutorialEnrollments.map(e => ({ ...e, course_id: e.tutorial_id, enrollmentType: "tutorial" }))
+        ];
+      }
 
-      if (lectureEnrollmentsRes.error) throw lectureEnrollmentsRes.error;
-      if (tutorialEnrollmentsRes.error) throw tutorialEnrollmentsRes.error;
-
-      const lectureEnrollments = lectureEnrollmentsRes.data || [];
-      const tutorialEnrollments = tutorialEnrollmentsRes.data || [];
+      console.log("All enrollments:", allEnrollments);
 
       // Get attendance records for today's sessions
       const { data: attendanceRecords, error: attendanceError } = await supabase
         .from("attendance_record")
-        .select(`
-          user_id,
-          attendance_session_id,
-          status,
-          attendance_session (
-            course_lecture_id,
-            course_tutorial_id,
-            created_at,
-          )
-        `)
-        .in("attendance_session_id", sessionIds);
+        .select("session_id, lecture_enrollment_id, tutorial_enrollment_id, status")
+        .in("session_id", sessionIds);
 
       if (attendanceError) throw attendanceError;
 
       console.log("Attendance records:", attendanceRecords);
 
       // Calculate total absences
+      const courseMeta = {};
+      lectureRes.data?.forEach(c => { courseMeta[c.id] = { code: c.course_code, title: c.course_title }; });
+      tutorialRes.data?.forEach(c => { courseMeta[c.id] = { code: c.course_code, title: c.course_title }; });
+
       let totalAbsences = 0;
+      const absencesList = [];
 
       allSessions.forEach(session => {
         // Get enrolled students for this session
-        let enrolledStudentIds = [];
-        
-        if (session.course_lecture_id) {
-          enrolledStudentIds = lectureEnrollments
-            .filter(enrollment => enrollment.course_id === session.course_lecture_id)
-            .map(enrollment => enrollment.user_id);
-        } else if (session.course_tutorial_id) {
-          enrolledStudentIds = tutorialEnrollments
-            .filter(enrollment => enrollment.tutorial_id === session.course_tutorial_id)
-            .map(enrollment => enrollment.user_id);
+        let enrolledEnrollments = [];
+        const isLecture = Boolean(session.course_lecture_id);
+
+        if (isLecture) {
+          enrolledEnrollments = allEnrollments
+            .filter(enrollment => enrollment.enrollmentType === "lecture" && enrollment.course_id === session.course_lecture_id);
+        } else {
+          enrolledEnrollments = allEnrollments
+            .filter(enrollment => enrollment.enrollmentType === "tutorial" && enrollment.course_id === session.course_tutorial_id);
         }
 
-        // Get students who attended this session
-        const attendedStudentIds = attendanceRecords
-          .filter(record => record.attendance_session_id === session.id)
-          .map(record => record.user_id);
+        // Get enrollment ids that attended this session
+        const attendedEnrollmentIds = attendanceRecords
+          .filter(record => record.session_id === session.id)
+          .map(record => isLecture ? record.lecture_enrollment_id : record.tutorial_enrollment_id);
 
         // Calculate absences for this session
-        const absentStudentIds = enrolledStudentIds.filter(
-          studentId => !attendedStudentIds.includes(studentId)
+        const absentEnrollments = enrolledEnrollments.filter(
+          enrollment => !attendedEnrollmentIds.includes(enrollment.id)
         );
 
-        totalAbsences += absentStudentIds.length;
+        console.log(`Session ${session.id}: ${enrolledEnrollments.length} enrolled, ${attendedEnrollmentIds.length} attended, ${absentEnrollments.length} absent`);
+        
+        totalAbsences += absentEnrollments.length;
+
+        // Build absence entries for this session
+        const courseInfo = session.course_lecture_id
+          ? courseMeta[session.course_lecture_id]
+          : courseMeta[session.course_tutorial_id];
+
+        const sessionDate = session.date || session.created_at;
+        const sessionTime = session.start_time || session.created_at;
+
+        absentEnrollments.forEach(enrollment => {
+          absencesList.push({
+            id: `${session.id}-${enrollment.id}`,
+            sessionId: session.id,
+            student: enrollment.users?.name || "Unknown",
+            studentId: enrollment.student_id,
+            course: courseInfo?.code || courseInfo?.title || "Course",
+            date: sessionDate ? new Date(sessionDate).toLocaleDateString() : "",
+            time: sessionTime ? new Date(sessionTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "",
+            mcSubmitted: false,
+            status: "Pending",
+          });
+        });
       });
 
-      // Get MC submissions count for lecturer's courses
-      const { data: mcSubmissions, error: mcError } = await supabase
+      // Fetch MC submissions for these sessions to mark per-row MC status and summary stats
+      const { data: mcRows, error: mcRowsError } = await supabase
         .from("mc_submissions")
-        .select("id, status, course_id")
-        .or(`course_id.in.(${[...lectureIds, ...tutorialIds].join(',')})`);
+        .select("student_id, session_id, status")
+        .in("session_id", sessionIds);
 
-      if (mcError && mcError.code !== 'PGRST116') { // Ignore "relation does not exist" error
-        console.error("Error fetching MC submissions:", mcError);
+      if (mcRowsError && mcRowsError.code !== 'PGRST116') {
+        console.error("Error fetching MC submissions:", mcRowsError);
       }
+      const mcMap = new Map((mcRows || []).map(r => [`${r.session_id}-${r.student_id}`, r.status]));
+      const mcSubmitted = (mcRows || []).length;
+      const pendingReview = (mcRows || []).filter(r => r.status === 'pending_review').length;
 
-      const mcSubmitted = mcSubmissions?.length || 0;
-      const pendingReview = mcSubmissions?.filter(mc => mc.status === 'pending')?.length || 0;
-
-      // For now, assume emails are sent for all absences (you can implement actual email tracking)
-      const emailsSent = totalAbsences;
+      // Enhance per-row data using email logs and MC submissions
+      const enhancedAbsences = absencesList.map(a => {
+        const key = `${a.sessionId}-${a.studentId}`;
+        const mcStatus = mcMap.get(key);
+        return {
+          ...a,
+          mcSubmitted: Boolean(mcStatus),
+          status: mcStatus
+            ? (mcStatus === 'pending_review'
+                ? 'Under Review'
+                : mcStatus === 'approved'
+                  ? 'Approved'
+                  : mcStatus === 'rejected'
+                    ? 'Rejected'
+                    : 'Under Review')
+            : 'Pending'
+        };
+      });
 
       console.log("Calculated stats:", {
         totalAbsences,
-        emailsSent,
         mcSubmitted,
         pendingReview
       });
 
       setAbsenceStats({
         totalAbsences,
-        emailsSent,
         mcSubmitted,
         pendingReview
       });
+
+      setAbsences(enhancedAbsences);
+      setAbsencesLoading(false);
 
     } catch (error) {
       console.error("Error fetching absence stats:", error);
       setAbsenceStats({
         totalAbsences: 0,
-        emailsSent: 0,
         mcSubmitted: 0,
         pendingReview: 0
       });
+      setAbsences([]);
+      setAbsencesLoading(false);
     } finally {
       setLoading(false);
+      setAbsencesLoading(false);
     }
-  };
+  }, [user?.id]);
 
-  const handleUpdateTemplate = () => {
-    setSnackbar({ open: true, message: "Email settings updated successfully.", severity: "success" });
+  // Fetch absence statistics
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchAbsenceStats();
+  }, [fetchAbsenceStats, user?.id]);
+
+  const handleUpdateTemplate = async () => {
+    if (!user?.id) {
+      setSnackbar({ open: true, message: "User not found. Please log in again.", severity: "error" });
+      return;
+    }
+
+    setSettingsLoading(true);
+    try {
+      // Check if settings exist for this lecturer
+      const { data: existingSettings } = await supabase
+        .from('email_settings')
+        .select('lecturer_id')
+        .eq('lecturer_id', user.id)
+        .single();
+
+      let result;
+      if (existingSettings) {
+        // Update existing settings
+        result = await supabase
+          .from('email_settings')
+          .update({
+            email_template: emailSettings.emailTemplate,
+            updated_at: new Date().toISOString()
+          })
+          .eq('lecturer_id', user.id);
+      } else {
+        // Insert new settings
+        result = await supabase
+          .from('email_settings')
+          .insert([{
+            lecturer_id: user.id,
+            email_template: emailSettings.emailTemplate,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+      }
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      setSnackbar({ open: true, message: "Email settings updated successfully.", severity: "success" });
+    } catch (error) {
+      console.error('Error saving email settings:', error);
+      setSnackbar({ open: true, message: "Failed to update email settings. Please try again.", severity: "error" });
+    } finally {
+      setSettingsLoading(false);
+    }
   };
 
   const handleTabChange = (_e, newValue) => setActiveTab(newValue);
@@ -275,6 +405,18 @@ export default function AbsenceManagement() {
     "& .MuiInputLabel-root.Mui-focused": { color: "#0f172a" },
     input: { color: "#0f172a" },
   };
+
+  // Derived list filtered by search term (case-insensitive)
+  const filteredAbsences = (absences || []).filter((a) => {
+    const q = (searchTerm || "").toLowerCase().trim();
+    if (!q) return true;
+    return (
+      String(a.student || "").toLowerCase().includes(q) ||
+      String(a.studentId || "").toLowerCase().includes(q) ||
+      String(a.course || "").toLowerCase().includes(q) ||
+      String(a.status || "").toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
@@ -305,10 +447,10 @@ export default function AbsenceManagement() {
 
         {activeTab === 0 && (
           <>
-            <div className="grid grid-cols-4 gap-[10px] mt-[20px]">
+            <div className="grid grid-cols-3 gap-[10px] mt-[20px]">
               {loading ? (
                 // Loading state
-                Array.from({ length: 4 }).map((_, idx) => (
+                Array.from({ length: 3 }).map((_, idx) => (
                   <Card key={idx} className="border" sx={{ background: "#ffffff", color: "#0f172a", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
                     <CardContent sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '120px' }}>
                       <CircularProgress size={24} />
@@ -321,11 +463,6 @@ export default function AbsenceManagement() {
                     title: "Total Absences", 
                     value: absenceStats.totalAbsences, 
                     subtitle: "Today's absence count" 
-                  },
-                  { 
-                    title: "Emails Sent", 
-                    value: absenceStats.emailsSent, 
-                    subtitle: absenceStats.totalAbsences > 0 ? `${Math.round((absenceStats.emailsSent / absenceStats.totalAbsences) * 100)}% of absences` : "No absences today"
                   },
                   { 
                     title: "MC Submitted", 
@@ -369,10 +506,12 @@ export default function AbsenceManagement() {
                     }}
                     size="small"
                     sx={{ borderRadius: 1, flex: 1, ...inputSx }}
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
                   />
                 </div>
 
-                <AbsenceTable />
+                <AbsenceTable absences={filteredAbsences} loading={absencesLoading} />
               </CardContent>
             </Card>
           </>
@@ -385,7 +524,7 @@ export default function AbsenceManagement() {
               subheader={<Typography variant="body2" color="text.secondary">Review and approve student absence documentation</Typography>}
             />
             <CardContent>
-              <MCSubmissions />
+              <MCSubmissions onChanged={fetchAbsenceStats} />
             </CardContent>
           </Card>
         )}
@@ -396,7 +535,7 @@ export default function AbsenceManagement() {
               title={<Typography variant="h6" fontWeight="bold">Leave Requests</Typography>}
               subheader={<Typography variant="body2" color="text.secondary">Review and manage student leave requests</Typography>}
             />
-            <LeaveRequestList />
+            <LeaveRequestList onChanged={fetchAbsenceStats} />
           </Card>
         )}
 
@@ -407,41 +546,27 @@ export default function AbsenceManagement() {
               subheader={<Typography variant="body2" color="text.secondary">Configure automated absence email notifications</Typography>}
             />
             <CardContent>
-              <TextField select fullWidth label="Email Timing" defaultValue="immediate" margin="normal">
-                <MenuItem value="immediate">Immediate (After class)</MenuItem>
-                <MenuItem value="daily">Daily Summary</MenuItem>
-                <MenuItem value="weekly">Weekly Summary</MenuItem>
-              </TextField>
-
-              <TextField select fullWidth label="Reminder Frequency" defaultValue="3days" margin="normal">
-                <MenuItem value="none">No Reminders</MenuItem>
-                <MenuItem value="1day">Every Day</MenuItem>
-                <MenuItem value="3days">Every 3 Days</MenuItem>
-                <MenuItem value="weekly">Weekly</MenuItem>
-              </TextField>
-
-              <Box mt={2}>
+              <Box>
                 <Typography variant="body2" gutterBottom>Email Template</Typography>
+                <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                  Use placeholders: [Student Name], [Course Code], [Course Name], [Absence Date], [Submission Link], [University Name]
+                </Typography>
                 <textarea
-                  rows={10}
-                  style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #e5e7eb", background: "#ffffff", color: "#0f172a" }}
-                  defaultValue={`Dear [Student Name],
-
-We have noticed that you were absent from [Course Name] on [Absence Date].
-
-According to university policy, all absences must be documented with a valid Medical Certificate (MC) or Letter of Absence. Please submit your documentation within 7 days of this notice through the student portal.
-
-If you have any questions or need assistance, please contact the Student Affairs Office.
-
-Thank you,
-[University Name] Attendance Management System`}
+                  rows={12}
+                  style={{ width: "100%", padding: 12, borderRadius: 4, border: "1px solid #e5e7eb", background: "#ffffff", color: "#0f172a", fontFamily: "monospace", fontSize: "14px" }}
+                  value={emailSettings.emailTemplate}
+                  onChange={(e) => setEmailSettings({ ...emailSettings, emailTemplate: e.target.value })}
                 />
               </Box>
 
-              <TextField fullWidth margin="normal" label="CC Emails" defaultValue="studentaffairs@university.edu, academicoffice@university.edu" />
-
-              <Button fullWidth variant="contained" sx={{ mt: 2 }} onClick={handleUpdateTemplate}>
-                Update Email Settings
+              <Button 
+                fullWidth 
+                variant="contained" 
+                sx={{ mt: 2 }} 
+                onClick={handleUpdateTemplate}
+                disabled={settingsLoading}
+              >
+                {settingsLoading ? "Saving..." : "Update Email Settings"}
               </Button>
             </CardContent>
           </Card>

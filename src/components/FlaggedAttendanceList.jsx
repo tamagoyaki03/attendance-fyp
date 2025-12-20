@@ -17,6 +17,7 @@ import {
   Typography,
 } from "@mui/material"
 import { Search, AccessTime, LocationOn, Report } from "@mui/icons-material"
+import ViewDetailsButton from "./ViewDetailsButton"
 
 const flaggedAttendance = [
   {
@@ -159,9 +160,7 @@ export default function FlaggedAttendanceList({ onSelectStudent }) {
                   </TableCell>
 
                   <TableCell align="right">
-                    <Button variant="outlined" size="small" onClick={() => onSelectStudent(student)}>
-                      View Details
-                    </Button>
+                    <ViewDetailsButton onClick={() => handleSelectStudent(student)} />
                   </TableCell>
                 </TableRow>
               ))

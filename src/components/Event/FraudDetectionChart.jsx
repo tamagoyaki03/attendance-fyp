@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   AreaChart,
   Area,
@@ -10,28 +10,67 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useTheme } from "@mui/material/styles";
+import { format, subDays, eachDayOfInterval, startOfYear } from "date-fns";
+import { CircularProgress, Box, Typography } from "@mui/material";
+import supabase from "../../config/supabaseClient";
 
-// Sample data
-const fraudData = [
-  { date: "Apr 1", attempts: 12 },
-  { date: "Apr 2", attempts: 15, },
-  { date: "Apr 3", attempts: 18},
-  { date: "Apr 4", attempts: 14},
-  { date: "Apr 5", attempts: 10},
-  { date: "Apr 6", attempts: 8},
-  { date: "Apr 7", attempts: 9},
-  { date: "Apr 8", attempts: 11},
-  { date: "Apr 9", attempts: 13},
-  { date: "Apr 10", attempts: 16 },
-  { date: "Apr 11", attempts: 14 },
-  { date: "Apr 12", attempts: 12 },
-  { date: "Apr 13", attempts: 10 },
-  { date: "Apr 14", attempts: 9 },
-];
-
-export default function FraudDetectionChart() {
+export default function FraudDetectionChart({ timeRange = "30days" }) {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
+  const [fraudData, setFraudData] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchFraudData = async () => {
+      setLoading(true);
+      try {
+        // Placeholder: Generate sample fraud data based on time range
+        // TODO: Replace with actual fraud detection table queries when available
+        const today = new Date();
+        let startDate;
+
+        switch (timeRange) {
+          case "7days":
+            startDate = subDays(today, 7);
+            break;
+          case "30days":
+            startDate = subDays(today, 30);
+            break;
+          case "90days":
+            startDate = subDays(today, 90);
+            break;
+          case "year":
+            startDate = startOfYear(today);
+            break;
+          default:
+            startDate = subDays(today, 30);
+        }
+
+        const days = eachDayOfInterval({ start: startDate, end: today });
+        const mockData = days.map((day) => ({
+          date: format(day, "MMM d"),
+          attempts: Math.floor(Math.random() * 10) + 5, // Random between 5-15
+        }));
+
+        setFraudData(mockData);
+      } catch (error) {
+        console.error("Error fetching fraud data:", error);
+        setFraudData([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFraudData();
+  }, [timeRange]);
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" height={400}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <ResponsiveContainer width="100%" height={400}>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Box,
   Card,
@@ -19,20 +19,8 @@ import supabase from "../config/supabaseClient";
 
 export default function FraudDetection() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [course, setCourse] = useState("");
   const [distance, setDistance] = useState(1.0);
-  const [courses, setCourses] = useState([]);
-
-  useEffect(() => {
-    const fetchCourses = async () => {
-      const { data, error } = await supabase.from("classes").select("id, code, name");
-      if (!error && data) {
-        setCourses(data);
-        if (data.length > 0) setCourse(data[0].id);
-      }
-    };
-    fetchCourses();
-  }, []);
+  // No course selection – analysis applies to all sessions
 
   return (
     <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
@@ -60,27 +48,9 @@ export default function FraudDetection() {
           <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
             <Box sx={{ p: 2, pb: 0 }}>
               <Typography variant="h6">Location Analysis</Typography>
-              <Typography variant="body2" color="text.secondary">Compare student and lecturer locations</Typography>
+              <Typography variant="body2" color="text.secondary">Compare student check-in vs class location (all sessions)</Typography>
             </Box>
             <CardContent>
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel id="course-label">Course</InputLabel>
-                <Select
-                  labelId="course-label"
-                  id="course"
-                  value={course}
-                  label="Course"
-                  onChange={(e) => setCourse(e.target.value)}
-                  size="small"
-                >
-                  {courses.map((cls) => (
-                    <MenuItem key={cls.id} value={cls.id}>
-                      {cls.code} - {cls.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
               <Box mb={2}>
                 <InputLabel htmlFor="distance" sx={{ mb: 1, display: "block", color: "text.secondary" }}>
                   Max Distance (km)
@@ -106,19 +76,20 @@ export default function FraudDetection() {
           <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
             <Box sx={{ p: 2, pb: 0 }}>
               <Typography variant="h6">Time Analysis</Typography>
-              <Typography variant="body2" color="text.secondary">Check for suspicious check-in/out patterns</Typography>
+              <Typography variant="body2" color="text.secondary">Check for suspicious check-in/out timestamps (all sessions)</Typography>
             </Box>
             <CardContent>
               <Box mb={2}>
                 <InputLabel htmlFor="buffer" sx={{ mb: 1, display: "block", color: "text.secondary" }}>
                   Late Buffer (minutes)
                 </InputLabel>
-                <TextField id="buffer" type="number" defaultValue={5} size="small" fullWidth sx={{ "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }} />
+                <Box display="flex" gap={1}>
+                  <TextField id="buffer" type="number" defaultValue={5} size="small" fullWidth sx={{ "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }} />
+                  <Button variant="contained" sx={{ bgcolor: "#0f172a", color: "#fff", "&:hover": { bgcolor: "#0b1320" } }}>
+                    Update
+                  </Button>
+                </Box>
               </Box>
-
-              <Button variant="contained" sx={{ bgcolor: "#0f172a", color: "#fff", "&:hover": { bgcolor: "#0b1320" } }}>
-                Update Settings
-              </Button>
             </CardContent>
           </Card>
         </div>
@@ -155,7 +126,7 @@ export default function FraudDetection() {
           </Box>
 
           <CardContent>
-            <FraudTable searchTerm={searchTerm} courseId={course} />
+            <FraudTable searchTerm={searchTerm} />
           </CardContent>
         </Card>
       </main>

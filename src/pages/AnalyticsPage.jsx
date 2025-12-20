@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Box,
   Grid,
@@ -18,6 +18,8 @@ import {
   useTheme,
   TextField,
   InputAdornment,
+  CircularProgress,
+  Alert,
 } from "@mui/material";
 import {
   Download,
@@ -34,31 +36,139 @@ import {
   WarningAmber,
 } from "@mui/icons-material";
 import { Search as SearchIcon } from "@mui/icons-material";
+import { format, subDays, subMonths, startOfYear } from "date-fns";
 import Sidebar from "../components/Sidebar";
 import AttendanceTrends from "../components/Event/AttendanceTrends";
 import TopAbsenceReasons from "../components/Event/TopAbsenceReason";
 import FraudDetectionChart from "../components/Event/FraudDetectionChart";
+import supabase from "../config/supabaseClient";
+import { calculateAttendanceMetrics } from "../utils/analyticsUtils";
 
 export default function AnalyticsPage() {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState("30days");
   const [tab, setTab] = useState(0);
   const theme = useTheme();
+  const [kpiData, setKpiData] = useState({
+    avgAttendanceRate: 0,
+    chronicAbsenteeism: 0,
+    lateCheckIns: 0,
+    fraudAttempts: 0,
+    prevAttendanceRate: 0,
+    prevAbsenteeism: 0,
+    prevLateCheckIns: 0,
+    prevFraudAttempts: 0,
+  });
 
-  const refreshData = () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-    }, 1500);
+  const user = useMemo(() => {
+    const cached = sessionStorage.getItem("user");
+    return cached ? JSON.parse(cached) : null;
+  }, []);
+
+  // Calculate date range
+  const getDateRange = () => {
+    const today = new Date();
+    let startDate;
+    switch (timeRange) {
+      case "7days":
+        startDate = subDays(today, 7);
+        break;
+      case "30days":
+        startDate = subDays(today, 30);
+        break;
+      case "90days":
+        startDate = subDays(today, 90);
+        break;
+      case "year":
+        startDate = startOfYear(today);
+        break;
+      default:
+        startDate = subDays(today, 30);
+    }
+    return {
+      start: format(startDate, "yyyy-MM-dd"),
+      end: format(today, "yyyy-MM-dd"),
+      prevStart: format(subDays(startDate, Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))), "yyyy-MM-dd"),
+      prevEnd: format(subDays(startDate, 1), "yyyy-MM-dd"),
+    };
   };
 
-  const fraudItems = [
-  { label: "Location Spoofing", value: 42, color: "#ef4444" }, // red-500
-  { label: "QR Code Sharing", value: 28, color: "#f59e0b" },   // amber-500
-  { label: "Proxy Attendance", value: 15, color: "#3b82f6" },  // blue-500
-  { label: "Device Manipulation", value: 10, color: "#8b5cf6" }, // purple-500
-  { label: "Other", value: 5, color: "#6b7280" },               // gray-500
-];
+  // Fetch analytics data
+  const fetchAnalyticsData = async () => {
+    if (!user?.id) return;
+
+    setIsLoading(true);
+    try {
+      const dates = getDateRange();
+
+      // Use the new analytics utility for current period
+      const currentMetrics = await calculateAttendanceMetrics(dates.start, dates.end);
+      
+      // Use the new analytics utility for previous period
+      const prevMetrics = await calculateAttendanceMetrics(dates.prevStart, dates.prevEnd);
+
+      // Calculate percentages for current period
+      const avgAttendanceRate = currentMetrics.totalPossible > 0 
+        ? Math.round((currentMetrics.presentCount / currentMetrics.totalPossible) * 100) 
+        : 0;
+      const chronicAbsenteeism = currentMetrics.totalPossible > 0 
+        ? Math.round((currentMetrics.absentCount / currentMetrics.totalPossible) * 100) 
+        : 0;
+      const lateCheckIns = currentMetrics.totalPossible > 0 
+        ? Math.round((currentMetrics.lateCount / currentMetrics.totalPossible) * 100) 
+        : 0;
+
+      // Calculate percentages for previous period
+      const prevAttendanceRate = prevMetrics.totalPossible > 0 
+        ? Math.round((prevMetrics.presentCount / prevMetrics.totalPossible) * 100) 
+        : 0;
+      const prevAbsenteeism = prevMetrics.totalPossible > 0 
+        ? Math.round((prevMetrics.absentCount / prevMetrics.totalPossible) * 100) 
+        : 0;
+      const prevLateCheckIns = prevMetrics.totalPossible > 0 
+        ? Math.round((prevMetrics.lateCount / prevMetrics.totalPossible) * 100) 
+        : 0;
+
+      // Fraud attempts (placeholder for now - update when fraud schema is complete)
+      const fraudAttempts = 2; // Placeholder
+      const prevFraudAttempts = 1; // Placeholder
+
+      setKpiData({
+        avgAttendanceRate,
+        chronicAbsenteeism,
+        lateCheckIns,
+        fraudAttempts,
+        prevAttendanceRate,
+        prevAbsenteeism,
+        prevLateCheckIns,
+        prevFraudAttempts,
+      });
+    } catch (error) {
+      console.error("Error fetching analytics data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const [fraudItems, setFraudItems] = useState([]);
+
+  useEffect(() => {
+    fetchAnalyticsData();
+  }, [user?.id, timeRange]);
+
+  useEffect(() => {
+    // Fetch fraud data by method
+    // TODO: Replace with actual fraud detection table when ready
+    // For now, using placeholder data
+    const mockFraudData = [
+      { label: "Location Spoofing", value: 42, color: "#ef4444" },
+      { label: "QR Code Sharing", value: 28, color: "#f59e0b" },
+      { label: "Proxy Attendance", value: 15, color: "#3b82f6" },
+      { label: "Device Manipulation", value: 10, color: "#8b5cf6" },
+      { label: "Other", value: 5, color: "#6b7280" },
+    ];
+    setFraudItems(mockFraudData);
+  }, [timeRange]);
 
   return (
     <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
@@ -99,7 +209,7 @@ export default function AnalyticsPage() {
               </Select>
 
               <Tooltip title="Refresh">
-                <IconButton onClick={refreshData} disabled={isLoading} sx={{ color: "#0f172a" }}>
+                <IconButton onClick={fetchAnalyticsData} disabled={isLoading} sx={{ color: "#0f172a" }}>
                   <Refresh className={isLoading ? "animate-spin" : ""} />
                 </IconButton>
               </Tooltip>
@@ -109,32 +219,79 @@ export default function AnalyticsPage() {
 
         {/* KPI Cards (white cards, Overview style) */}
         <div className="grid grid-cols-4 gap-[10px] mt-6">
-          {[
-            { title: "Average Attendance Rate", value: "87.3%", icon: <BarChart />, change: "+2.5%", trend: <TrendingUp />, trendColor: "#22c55e" },
-            { title: "Chronic Absenteeism", value: "8.2%", icon: <CalendarToday />, change: "+0.7%", trend: <TrendingUp />, trendColor: "#ef4444" },
-            { title: "Late Check-ins", value: "12.4%", icon: <AccessTime />, change: "-1.2%", trend: <TrendingDown />, trendColor: "#22c55e" },
-            { title: "Fraud Attempts", value: "1.8%", icon: <WarningAmber />, change: "-0.3%", trend: <TrendingDown />, trendColor: "#22c55e" },
-          ].map((card, i) => (
-            <Card key={i} sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
-              <CardHeader
-                title={<Typography variant="subtitle2" color="text.secondary">{card.title}</Typography>}
-                avatar={<Box color="text.secondary">{card.icon}</Box>}
-              />
-              <CardContent>
-                <Box display="flex" alignItems="center" gap={1} justifyContent="space-between">
-                  <Box>
-                    <Typography variant="h5" fontWeight="bold">{card.value}</Typography>
-                    <Typography variant="caption" color="text.secondary">Compared to previous period</Typography>
-                  </Box>
-                  <Box textAlign="right">
-                    <Typography variant="body2" sx={{ color: card.trendColor, display: "flex", alignItems: "center", gap: 0.5 }}>
-                      {card.trend} {card.change}
-                    </Typography>
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          ))}
+          {isLoading ? (
+            <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "center", py: 4 }}>
+              <CircularProgress />
+            </div>
+          ) : (
+            [
+              {
+                title: "Average Attendance Rate",
+                value: `${kpiData.avgAttendanceRate}%`,
+                icon: <BarChart />,
+                change: kpiData.avgAttendanceRate - kpiData.prevAttendanceRate,
+              },
+              {
+                title: "Absent Rate",
+                value: `${kpiData.chronicAbsenteeism}%`,
+                icon: <CalendarToday />,
+                change: kpiData.chronicAbsenteeism - kpiData.prevAbsenteeism,
+              },
+              {
+                title: "Late Check-ins",
+                value: `${kpiData.lateCheckIns}%`,
+                icon: <AccessTime />,
+                change: kpiData.lateCheckIns - kpiData.prevLateCheckIns,
+              },
+              {
+                title: "Fraud Attempts",
+                value: `${kpiData.fraudAttempts}`,
+                icon: <WarningAmber />,
+                change: kpiData.fraudAttempts - kpiData.prevFraudAttempts,
+              },
+            ].map((card, i) => {
+              const isPositive = card.change >= 0;
+              const trendColor = i === 0 || (i === 2 && !isPositive) || (i === 3 && !isPositive) ? "#22c55e" : "#ef4444";
+              const TrendIcon = isPositive ? TrendingUp : TrendingDown;
+
+              return (
+                <Card
+                  key={i}
+                  sx={{
+                    background: "#ffffff",
+                    border: "1px solid #e2e8f0",
+                    boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+                  }}
+                >
+                  <CardHeader
+                    title={<Typography variant="subtitle2" color="text.secondary">{card.title}</Typography>}
+                    avatar={<Box color="text.secondary">{card.icon}</Box>}
+                  />
+                  <CardContent>
+                    <Box display="flex" alignItems="center" gap={1} justifyContent="space-between">
+                      <Box>
+                        <Typography variant="h5" fontWeight="bold">
+                          {card.value}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Compared to previous period
+                        </Typography>
+                      </Box>
+                      <Box textAlign="right">
+                        <Typography
+                          variant="body2"
+                          sx={{ color: trendColor, display: "flex", alignItems: "center", gap: 0.5 }}
+                        >
+                          <TrendIcon fontSize="small" />
+                          {Math.abs(card.change) > 0 ? `${isPositive ? "+" : ""}${card.change}%` : "No change"}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </CardContent>
+                </Card>
+              );
+            })
+          )}
         </div>
 
         <Box mt={2}>
@@ -142,14 +299,14 @@ export default function AnalyticsPage() {
             <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
               <CardHeader title="Attendance Trends" subheader="Daily attendance rates over time" />
               <CardContent>
-                <AttendanceTrends />
+                <AttendanceTrends timeRange={timeRange} />
               </CardContent>
             </Card>
 
             <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
               <CardHeader title="Top Absence Reasons" subheader="Most common reasons for absences" />
               <CardContent>
-                <TopAbsenceReasons />
+                <TopAbsenceReasons timeRange={timeRange} />
               </CardContent>
             </Card>
           </div>
@@ -158,7 +315,7 @@ export default function AnalyticsPage() {
             <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
               <CardHeader title="Fraud Detection Analysis" subheader="Detected fraud patterns and trends" />
               <CardContent>
-                <FraudDetectionChart />
+                <FraudDetectionChart timeRange={timeRange} />
               </CardContent>
             </Card>
 

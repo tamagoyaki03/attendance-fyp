@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   Table,
   TableBody,
@@ -11,35 +11,8 @@ import {
   Typography,
   Box,
 } from "@mui/material";
-import { toast } from "react-toastify";
 
-const absenceData = [
-  {
-    id: 1,
-    student: "John Smith",
-    studentId: "S12345",
-    course: "CS101",
-    date: "Apr 11, 2023",
-    time: "10:15 AM",
-    emailSent: true,
-    mcSubmitted: false,
-    status: "Pending",
-  },
-  {
-    id: 2,
-    student: "Emma Johnson",
-    studentId: "S12346",
-    course: "BIO202",
-    date: "Apr 11, 2023",
-    time: "11:30 AM",
-    emailSent: true,
-    mcSubmitted: true,
-    status: "Under Review",
-  },
-];
-
-export default function AbsenceTable() {
-  const [absences] = useState(absenceData);
+export default function AbsenceTable({ absences = [], loading = false }) {
 
   const getStatusChip = (status) => {
     switch (status) {
@@ -61,6 +34,71 @@ export default function AbsenceTable() {
       default:
         return <Chip label={status} variant="outlined" size="small" />;
     }
+  };
+
+  const renderBody = () => {
+    if (loading) {
+      return (
+        <TableRow>
+          <TableCell colSpan={5} align="center">
+            <Typography variant="body2" color="text.secondary">
+              Loading absences...
+            </Typography>
+          </TableCell>
+        </TableRow>
+      );
+    }
+
+    if (!absences || absences.length === 0) {
+      return (
+        <TableRow>
+          <TableCell colSpan={5} align="center">
+            <Typography variant="body2" color="text.secondary">
+              No absences recorded.
+            </Typography>
+          </TableCell>
+        </TableRow>
+      );
+    }
+
+    return absences.map((absence) => (
+      <TableRow
+        key={absence.id}
+        sx={{
+          "&:hover": { backgroundColor: "#f8fafc" },
+        }}
+      >
+        <TableCell>
+          <Box>
+            <Typography fontWeight="bold" color="text.primary">
+              {absence.student}
+            </Typography>
+          </Box>
+        </TableCell>
+
+        <TableCell>
+          <Typography color="text.primary">{absence.course}</Typography>
+        </TableCell>
+
+        <TableCell>
+          <div>{absence.date}</div>
+          <Typography variant="caption" color="text.secondary">
+            {absence.time}
+          </Typography>
+        </TableCell>
+
+        <TableCell>
+          <Chip
+            label={absence.mcSubmitted ? "Submitted" : "Not Submitted"}
+            size="small"
+            variant={absence.mcSubmitted ? "filled" : "outlined"}
+            color={absence.mcSubmitted ? "success" : "error"}
+          />
+        </TableCell>
+
+        <TableCell>{getStatusChip(absence.status)}</TableCell>
+      </TableRow>
+    ));
   };
 
   return (
@@ -94,11 +132,6 @@ export default function AbsenceTable() {
             </TableCell>
             <TableCell>
               <Typography variant="subtitle2" color="text.secondary">
-                Email Status
-              </Typography>
-            </TableCell>
-            <TableCell>
-              <Typography variant="subtitle2" color="text.secondary">
                 MC Status
               </Typography>
             </TableCell>
@@ -110,58 +143,7 @@ export default function AbsenceTable() {
           </TableRow>
         </TableHead>
 
-        <TableBody>
-          {absences.map((absence) => (
-            <TableRow
-              key={absence.id}
-              sx={{
-                "&:hover": { backgroundColor: "#f8fafc" },
-              }}
-            >
-              <TableCell>
-                <Box>
-                  <Typography fontWeight="bold" color="text.primary">
-                    {absence.student}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {absence.studentId}
-                  </Typography>
-                </Box>
-              </TableCell>
-
-              <TableCell>
-                <Typography color="text.primary">{absence.course}</Typography>
-              </TableCell>
-
-              <TableCell>
-                <div>{absence.date}</div>
-                <Typography variant="caption" color="text.secondary">
-                  {absence.time}
-                </Typography>
-              </TableCell>
-
-              <TableCell>
-                <Chip
-                  label={absence.emailSent ? "Sent" : "Not Sent"}
-                  size="small"
-                  variant={absence.emailSent ? "filled" : "outlined"}
-                  color={absence.emailSent ? "success" : "error"}
-                />
-              </TableCell>
-
-              <TableCell>
-                <Chip
-                  label={absence.mcSubmitted ? "Submitted" : "Not Submitted"}
-                  size="small"
-                  variant={absence.mcSubmitted ? "filled" : "outlined"}
-                  color={absence.mcSubmitted ? "success" : "error"}
-                />
-              </TableCell>
-
-              <TableCell>{getStatusChip(absence.status)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
+        <TableBody>{renderBody()}</TableBody>
       </Table>
     </TableContainer>
   );

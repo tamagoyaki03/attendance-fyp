@@ -1,5 +1,4 @@
 import React from 'react';
-import supabase from "../config/supabaseClient"
 import { FaBell } from "react-icons/fa";
 import { GoBook } from "react-icons/go";
 import { MdOutlineAnalytics } from "react-icons/md";

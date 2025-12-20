@@ -64,16 +64,31 @@ export default function ReportsPage() {
 
         <Box mt={2}>
           {activeTab === 0 && (
-            <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
-              <CardHeader
-                sx={{ pb: 0 }}
-                title={<Typography variant="h6" fontWeight="bold" color="text.primary">Attendance Reports</Typography>}
-                subheader={<Typography variant="body2" color="text.secondary">Generate and view attendance summaries and trends.</Typography>}
-              />
-              <CardContent>
-                <AttendanceReportsTab />
-              </CardContent>
-            </Card>
+            <>
+              <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+                <CardHeader
+                  sx={{ pb: 0 }}
+                  title={<Typography variant="h6" fontWeight="bold" color="text.primary">Attendance Reports</Typography>}
+                  subheader={<Typography variant="body2" color="text.secondary">Generate and view attendance summaries and trends.</Typography>}
+                />
+                <CardContent>
+                  <AttendanceReportsTab />
+                </CardContent>
+              </Card>
+
+              <Box mt={4}>
+                <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
+                  <CardHeader
+                    sx={{ pb: 0 }}
+                    title={<Typography variant="h6" fontWeight="bold" color="text.primary">Report Generator</Typography>}
+                    subheader={<Typography variant="body2" color="text.secondary">Create custom reports for download or email.</Typography>}
+                  />
+                  <CardContent>
+                    <ReportGenerator />
+                  </CardContent>
+                </Card>
+              </Box>
+            </>
           )}
 
           {activeTab === 1 && (
@@ -101,19 +116,6 @@ export default function ReportsPage() {
               </CardContent>
             </Card>
           )}
-        </Box>
-
-        <Box mt={4}>
-          <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
-            <CardHeader
-              sx={{ pb: 0 }}
-              title={<Typography variant="h6" fontWeight="bold" color="text.primary">Report Generator</Typography>}
-              subheader={<Typography variant="body2" color="text.secondary">Create custom reports for download or email.</Typography>}
-            />
-            <CardContent>
-              <ReportGenerator />
-            </CardContent>
-          </Card>
         </Box>
       </main>
     </div>

@@ -14,24 +14,26 @@ import {
 import Chip from "@mui/material/Chip";
 import supabase from "../config/supabaseClient";
 
-export default function FraudTable({ searchTerm = "", courseId }) {
+export default function FraudTable({ searchTerm = "" }) {
   const [alerts, setAlerts] = useState([]);
   const [usersMap, setUsersMap] = useState({});
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: issues, error: issuesError } = await supabase
-        .from("attendance_issues")
-        .select("*");
+      // Fetch from new fraud_detection_alerts table
+      const { data: alerts, error: alertsError } = await supabase
+        .from("fraud_detection_alerts")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-      if (issuesError) {
-        console.error("Error fetching attendance issues:", issuesError.message);
+      if (alertsError) {
+        console.error("Error fetching fraud detection alerts:", alertsError.message);
         return;
       }
 
-      setAlerts(issues || []);
+      setAlerts(alerts || []);
 
-      const userIds = [...new Set((issues || []).map((i) => i.user_id))];
+      const userIds = [...new Set((alerts || []).map((a) => a.user_id))];
 
       if (userIds.length > 0) {
         const { data: users, error: usersError } = await supabase
@@ -53,28 +55,48 @@ export default function FraudTable({ searchTerm = "", courseId }) {
   const term = (searchTerm || "").toLowerCase();
   const filteredData = alerts.filter((row) =>
     term
-      ? (row.issue_type ?? "").toLowerCase().includes(term) ||
-        (row.description ?? "").toLowerCase().includes(term)
+      ? (row.alert_type ?? "").toLowerCase().includes(term) ||
+        (row.description ?? "").toLowerCase().includes(term) ||
+        (row.course_code ?? "").toLowerCase().includes(term)
       : true
   );
 
   const handleResolve = async (id) => {
-    await supabase.from("attendance_issues").update({ status: "resolved" }).eq("id", id);
+    await supabase
+      .from("fraud_detection_alerts")
+      .update({ status: "resolved", resolved_at: new Date().toISOString() })
+      .eq("id", id);
 
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, status: "resolved" } : a)));
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: "resolved" } : a))
+    );
   };
 
   const getStatusBadge = (status) => {
     const s = (status || "").toLowerCase();
     switch (s) {
-      case "pending":
-        return <Chip label="Pending" variant="outlined" sx={{ borderColor: "#f59e0b", color: "#b45309" }} size="small" />;
       case "open":
         return <Chip label="Open" color="error" variant="outlined" size="small" />;
+      case "reviewed":
+        return <Chip label="Reviewed" variant="outlined" sx={{ borderColor: "#f59e0b", color: "#b45309" }} size="small" />;
       case "resolved":
         return <Chip label="Resolved" color="success" variant="outlined" size="small" />;
       default:
         return <Chip label={status || "Unknown"} size="small" />;
+    }
+  };
+
+  const getSeverityBadge = (severity) => {
+    const s = (severity || "medium").toLowerCase();
+    switch (s) {
+      case "high":
+        return <Chip label="High" color="error" size="small" />;
+      case "medium":
+        return <Chip label="Medium" color="warning" size="small" />;
+      case "low":
+        return <Chip label="Low" color="success" size="small" />;
+      default:
+        return <Chip label={severity || "Unknown"} size="small" />;
     }
   };
 

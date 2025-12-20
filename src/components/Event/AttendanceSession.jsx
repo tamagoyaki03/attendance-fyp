@@ -17,15 +17,37 @@ import QrCodeIcon from "@mui/icons-material/QrCode";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
 import Button from "../Button";
 import supabase from "../../config/supabaseClient";
+import { startFraudMonitoring, stopFraudMonitoring } from "../../utils/fraudUtils";
 
 async function saveSessionPassword(sessionId, password) {
   if (sessionId && password) {
     try {
+      // Get current date and time
+      const now = new Date();
+      const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+      const currentTime = now.toTimeString().split(' ')[0]; // HH:MM:SS format
+      
+      // Calculate end time (assuming 2-hour sessions, adjust as needed)
+      const endDateTime = new Date(now.getTime() + (2 * 60 * 60 * 1000)); // Add 2 hours
+      const endTime = endDateTime.toTimeString().split(' ')[0];
+      
+      console.log("Saving session data:", {
+        sessionId,
+        password,
+        date: currentDate,
+        start_time: currentTime,
+        end_time: endTime
+      });
+
       // Add timeout to the database query
       const { error } = await Promise.race([
         supabase
           .from("attendance_session")
-          .update({ attendance_password: password })
+          .update({ 
+            attendance_password: password,
+            date: currentDate,
+            start_time: currentTime,
+          })
           .eq("id", sessionId),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Query timeout')), 10000)
@@ -46,11 +68,39 @@ async function saveSessionPassword(sessionId, password) {
   }
 }
 
-const formatTime = (seconds) => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-};
+async function updateSessionEndTime(sessionId) {
+  if (sessionId) {
+    try {
+      const now = new Date();
+      const endTime = now.toTimeString().split(' ')[0]; // HH:MM:SS format
+
+      console.log("Updating session end time:", {
+        sessionId,
+        end_time: endTime
+      });
+
+      const { error } = await Promise.race([
+        supabase
+          .from("attendance_session")
+          .update({ 
+            end_time: endTime
+          })
+          .eq("id", sessionId),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Query timeout')), 10000)
+        )
+      ]);
+      
+      if (error) {
+        console.error("Error updating session end time:", error);
+      } else {
+        console.log("Session end time updated successfully");
+      }
+    } catch (error) {
+      console.error("Failed to update session end time:", error.message);
+    }
+  }
+}
 
 export default function AttendanceSession({
   open,
@@ -70,6 +120,7 @@ export default function AttendanceSession({
   const [currentTime, setCurrentTime] = useState(new Date());
   const [location, setLocation] = useState(null);
   const creatingSession = useRef(false);
+  const fraudChannelRef = useRef(null);
 
   const handleContinueSession = () => {
     if (onClose && typeof onClose === 'function') {
@@ -77,11 +128,51 @@ export default function AttendanceSession({
     }
   };
 
-  const handleClose = () => {
-    if (onClose && typeof onClose === 'function') {
-      onClose(false);
-    }
-  };
+  const handleSessionExpire = async () => {
+   console.log("Session expired - updating end time");
+   await updateSessionEndTime(sessionId);
+   setIsExpired(true);
+   if (onExpire) {
+     onExpire();
+   }
+ };
+
+ const handleFinalizeSession = async () => {
+   console.log("Finalizing session - updating end time");
+   await updateSessionEndTime(sessionId);
+   if (onFinalize) {
+     onFinalize();
+   }
+   onClose();
+ };
+
+ const handleEndSession = async () => {
+   if (requireQrToEnd) {
+     // If QR is required, show QR code for check-out
+     console.log("QR required for ending session");
+     // The session will end when QR is scanned (handled by parent component)
+   } else {
+     // If no QR required, end session immediately
+     console.log("Ending session immediately (no QR required)");
+     await updateSessionEndTime(sessionId);
+     if (onFinalize) {
+       onFinalize();
+     }
+     onClose();
+   }
+ };
+
+// Auto-expire timer
+useEffect(() => {
+  if (sessionType === "start" && sessionId && !isExpired) {
+    // Set session to expire after 2 hours (7200000 ms)
+    const expireTimer = setTimeout(() => {
+      handleSessionExpire();
+    }, 2 * 60 * 60 * 1000); // 2 hours
+
+    return () => clearTimeout(expireTimer);
+  }
+}, [sessionType, sessionId, isExpired]);
 
   // Generate a QR code when the dialog opens
   useEffect(() => {
@@ -136,6 +227,17 @@ export default function AttendanceSession({
           if (sessionId && sessionPassword) {
             await saveSessionPassword(sessionId, sessionPassword);
           }
+
+          // Start fraud monitoring (location + time analysis) for this session
+          try {
+            if (sessionId) {
+              // Default options: 1.0 km max distance, 5 minutes time buffer
+              const channel = await startFraudMonitoring(sessionId, { maxKm: 1.0, timeBufferMinutes: 5 });
+              fraudChannelRef.current = channel;
+            }
+          } catch (e) {
+            console.warn("Could not start fraud monitoring for session:", e);
+          }
         } catch (error) {
           console.error("Error generating QR code:", error);
           const fallbackQrString = `course|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
@@ -164,6 +266,20 @@ export default function AttendanceSession({
       );
       setCurrentTime(new Date());
     }
+  }, [open]);
+
+  // Cleanup fraud monitoring when dialog closes or on unmount
+  useEffect(() => {
+    if (!open && fraudChannelRef.current) {
+      stopFraudMonitoring(fraudChannelRef.current);
+      fraudChannelRef.current = null;
+    }
+    return () => {
+      if (fraudChannelRef.current) {
+        stopFraudMonitoring(fraudChannelRef.current);
+        fraudChannelRef.current = null;
+      }
+    };
   }, [open]);
 
   // Add countdown timer effect
@@ -208,7 +324,7 @@ export default function AttendanceSession({
   return (
     <Dialog
       open={open}
-      onClose={() => onOpenChange(false)}
+      onClose={handleContinueSession}
       maxWidth="sm"
       PaperProps={{
         sx: {
@@ -303,9 +419,12 @@ export default function AttendanceSession({
 
       <DialogActions sx={{ px: 3, py: 2 }}>
         {sessionType === "start" ? (
-          <Button onClick={() => onOpenChange(false)} variant="contained">Continue Session</Button>
+          <>
+            <Button onClick={handleContinueSession} variant="outlined">Continue Session</Button>
+            <Button onClick={handleEndSession} variant="contained" color="error">End Attendance</Button>
+          </>
         ) : (
-          <Button onClick={onFinalize} variant="contained">Finalize Session</Button>
+          <Button onClick={handleFinalizeSession} variant="contained">Finalize Session</Button>
         )}
       </DialogActions>
     </Dialog>

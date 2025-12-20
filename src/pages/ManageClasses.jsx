@@ -36,7 +36,6 @@ const ManageClasses = () => {
 
   useEffect(() => {
     fetchClasses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchClasses = async () => {

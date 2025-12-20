@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import {
+ import {
   Box,
   Button,
   Chip,
@@ -14,11 +14,13 @@ import {
   TextField,
   Select,
   MenuItem,
+  TableContainer,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
+  Paper,
   Snackbar,
   IconButton,
   InputLabel,
@@ -28,8 +30,9 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import supabase from "../config/supabaseClient";
+import ViewDetailsButton from "./ViewDetailsButton";
 
-export default function LeaveRequestList() {
+export default function LeaveRequestList({ onChanged }) {
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -39,20 +42,36 @@ export default function LeaveRequestList() {
   const [snackbar, setSnackbar] = useState({ open: false, message: "" });
   const [loading, setLoading] = useState(true);
 
+  const handleViewDetails = (req) => {
+    setSelectedRequest(req);
+    setIsDetailsOpen(true);
+    setRejectionReason("");
+    setTabValue(0);
+  };
+
   useEffect(() => {
   const fetchLeaveRequests = async () => {
     setLoading(true);
 
-    const { data: leaveRequests, error: leaveError } = await supabase
-      .from("leave_requests")
-      .select("*");
+    const [leaveRes, usersRes, lectureRes, tutorialRes] = await Promise.all([
+      supabase.from("leave_requests").select("*"),
+      supabase.from("users").select("id, name"),
+      supabase.from("course_lecture").select("id, course_code, course_title"),
+      supabase.from("course_tutorial").select("id, course_code, course_title"),
+    ]);
 
-    const { data: users, error: userError } = await supabase
-      .from("users")
-      .select("id, name");
+    const leaveRequests = leaveRes.data || [];
+    const users = usersRes.data || [];
+    const courseMap = new Map();
+    (lectureRes.data || []).forEach((c) => {
+      courseMap.set(String(c.id), c.course_code || c.course_title || "");
+    });
+    (tutorialRes.data || []).forEach((c) => {
+      courseMap.set(String(c.id), c.course_code || c.course_title || "");
+    });
 
-    if (leaveError || userError) {
-      console.error("Error fetching leave requests:", leaveError || userError);
+    if (leaveRes.error || usersRes.error || lectureRes.error || tutorialRes.error) {
+      console.error("Error fetching leave requests:", leaveRes.error || usersRes.error || lectureRes.error || tutorialRes.error);
       setSnackbar({ open: true, message: "Error loading data" });
       setLoading(false);
       return;
@@ -74,7 +93,7 @@ export default function LeaveRequestList() {
                 .toUpperCase()
             : item.user_id.slice(0, 2).toUpperCase(),
         },
-        course: item.course_id || "N/A",
+        course: courseMap.get(String(item.course_id)) || item.course_id || "N/A",
         requestDate: new Date(item.created_at).toLocaleDateString(),
         startDate: new Date(item.date_time).toLocaleDateString(),
         endDate: new Date(item.date_time).toLocaleDateString(),
@@ -103,22 +122,98 @@ export default function LeaveRequestList() {
     statusFilter === "all" ? true : r.status === statusFilter
   );
 
-  const handleViewDetails = (req) => {
-    setSelectedRequest(req);
-    setIsDetailsOpen(true);
-    setRejectionReason("");
-    setTabValue(0);
+  const handleApprove = async (id) => {
+    try {
+      const { error } = await supabase
+        .from("leave_requests")
+        .update({ status: "approved" })
+        .eq("id", id);
+      if (error) console.warn("Leave request approve DB error:", error);
+
+      // Also create excused attendance records for sessions on the leave date for this lecturer's courses
+      const req = requests.find(r => r.id === id);
+      const lecturer = JSON.parse(sessionStorage.getItem("user") || "null");
+      if (req && lecturer?.id && req.user_id && req.date_time) {
+        const leaveDate = new Date(req.date_time);
+        // Build day range [start, end) in ISO for created_at and a date-only string for date column
+        const start = new Date(leaveDate);
+        start.setHours(0,0,0,0);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        const startIso = start.toISOString();
+        const endIso = end.toISOString();
+        const dateOnly = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+
+        // Fetch lecturer courses
+        const [lecRes, tutRes] = await Promise.all([
+          supabase.from("course_lecture").select("id").eq("lecturer_id", lecturer.id),
+          supabase.from("course_tutorial").select("id").eq("lecturer_id", lecturer.id)
+        ]);
+        const lectureIds = (lecRes.data || []).map(c => c.id);
+        const tutorialIds = (tutRes.data || []).map(c => c.id);
+
+        if (lectureIds.length + tutorialIds.length > 0) {
+          // Sessions matching courses AND falling on the same local day
+          let sessionQuery = supabase
+            .from("attendance_session")
+            .select("id, course_lecture_id, course_tutorial_id, date, created_at");
+          const courseOr = [];
+          if (lectureIds.length > 0) courseOr.push(`course_lecture_id.in.(${lectureIds.join(',')})`);
+          if (tutorialIds.length > 0) courseOr.push(`course_tutorial_id.in.(${tutorialIds.join(',')})`);
+          if (courseOr.length > 0) sessionQuery = sessionQuery.or(courseOr.join(','));
+          // date column may be populated OR we fallback to created_at range
+          sessionQuery = sessionQuery.or(`date.eq.${dateOnly},and(created_at.gte.${startIso},created_at.lt.${endIso})`);
+          const { data: sessions, error: sessErr } = await sessionQuery;
+          if (!sessErr && Array.isArray(sessions) && sessions.length > 0) {
+            // Fetch the student's enrollments for those courses
+            const [stuLecEnr, stuTutEnr] = await Promise.all([
+              lectureIds.length > 0
+                ? supabase.from("enrollment_lecture").select("id, course_id").eq("student_id", req.user_id).in("course_id", lectureIds)
+                : Promise.resolve({ data: [] }),
+              tutorialIds.length > 0
+                ? supabase.from("enrollment_tutorial").select("id, tutorial_id").eq("student_id", req.user_id).in("tutorial_id", tutorialIds)
+                : Promise.resolve({ data: [] })
+            ]);
+            const lecEnrollMap = new Map((stuLecEnr.data || []).map(e => [e.course_id, e.id]));
+            const tutEnrollMap = new Map((stuTutEnr.data || []).map(e => [e.tutorial_id, e.id]));
+
+            // Prepare inserts for each matching session
+            const inserts = [];
+            for (const s of sessions) {
+              if (s.course_lecture_id && lecEnrollMap.has(s.course_lecture_id)) {
+                inserts.push({ session_id: s.id, lecture_enrollment_id: lecEnrollMap.get(s.course_lecture_id), status: "excused" });
+              } else if (s.course_tutorial_id && tutEnrollMap.has(s.course_tutorial_id)) {
+                inserts.push({ session_id: s.id, tutorial_enrollment_id: tutEnrollMap.get(s.course_tutorial_id), status: "excused" });
+              }
+            }
+            if (inserts.length > 0) {
+              const { error: insErr } = await supabase.from("attendance_record").insert(inserts);
+              if (insErr) {
+                console.warn("Failed to insert excused attendance for leave:", insErr);
+                setSnackbar({ open: true, message: `Failed to add excused attendance: ${insErr.message || 'RLS or validation failed'}` });
+              } else {
+                setSnackbar({ open: true, message: "Excused attendance recorded." });
+              }
+            } else {
+              // No matching sessions/enrollments found on that date
+              setSnackbar({ open: true, message: "No matching sessions/enrollments found for leave date." });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Approve leave request failed:", e);
+    } finally {
+      setRequests((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, status: "approved" } : r))
+      );
+      setSnackbar({ open: true, message: "Leave request approved." });
+      setIsDetailsOpen(false);
+      try { onChanged && onChanged(); } catch (_) {}
+    }
   };
 
-  const handleApprove = (id) => {
-    setRequests((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, status: "approved" } : r))
-    );
-    setSnackbar({ open: true, message: "Leave request approved." });
-    setIsDetailsOpen(false);
-  };
-
-  const handleReject = (id) => {
+  const handleReject = async (id) => {
     if (!rejectionReason.trim()) {
       setSnackbar({
         open: true,
@@ -126,13 +221,24 @@ export default function LeaveRequestList() {
       });
       return;
     }
-    setRequests((prev) =>
-      prev.map((r) =>
-        r.id === id ? { ...r, status: "rejected", rejectionReason } : r
-      )
-    );
-    setSnackbar({ open: true, message: "Leave request rejected." });
-    setIsDetailsOpen(false);
+    try {
+      const { error } = await supabase
+        .from("leave_requests")
+        .update({ status: "rejected", rejection_reason: rejectionReason })
+        .eq("id", id);
+      if (error) console.warn("Leave request reject DB error:", error);
+    } catch (e) {
+      console.error("Reject leave request failed:", e);
+    } finally {
+      setRequests((prev) =>
+        prev.map((r) =>
+          r.id === id ? { ...r, status: "rejected", rejectionReason } : r
+        )
+      );
+      setSnackbar({ open: true, message: "Leave request rejected." });
+      setIsDetailsOpen(false);
+      try { onChanged && onChanged(); } catch (_) {}
+    }
   };
 
   const handleViewDocument = (doc) => {
@@ -164,46 +270,85 @@ return (
       {loading ? (
         <Box display="flex" justifyContent="center" mt={4}><CircularProgress /></Box>
       ) : (
-        <Table sx={{ border: "1px solid #fff", borderRadius: 2, width: "100%" }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Student</TableCell>
-              <TableCell>Course</TableCell>
-              <TableCell>Leave Period</TableCell>
-              <TableCell>Reason</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="right">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredRequests.length === 0 ? (
+        <TableContainer
+          component={Paper}
+          sx={{
+            mt: 2,
+            background: "#ffffff",
+            border: "1px solid #e2e8f0",
+            borderRadius: 2,
+            boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+            overflowX: "auto",
+            width: "100%",
+            boxSizing: "border-box",
+            m: 0,
+            p: 0,
+          }}
+        >
+          <Table size="small" sx={{ width: "100%" }}>
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={6} align="center">No leave requests found.</TableCell>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Student
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Course
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Leave Period
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Status
+                  </Typography>
+                </TableCell>
+                <TableCell align="right">
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Actions
+                  </Typography>
+                </TableCell>
               </TableRow>
-            ) : (
-              filteredRequests.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Avatar>{r.student.avatar}</Avatar>
-                      <Box>
-                        <Typography>{r.student.name}</Typography>
-                        <Typography variant="caption">{r.student.studentId}</Typography>
-                      </Box>
-                    </Box>
-                  </TableCell>
-                  <TableCell>{r.course}</TableCell>
-                  <TableCell>{r.startDate}</TableCell>
-                  <TableCell>{r.reason}</TableCell>
-                  <TableCell>{getStatusChip(r.status)}</TableCell>
-                  <TableCell align="right">
-                    <Button size="small" onClick={() => handleViewDetails(r)}>View Details</Button>
+            </TableHead>
+            <TableBody>
+              {filteredRequests.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    <Typography variant="body2" color="text.secondary">No leave requests found.</Typography>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                filteredRequests.map((r) => (
+                  <TableRow
+                    key={r.id}
+                    sx={{ "&:hover": { backgroundColor: "#f8fafc" } }}
+                  >
+                    <TableCell sx={{ maxWidth: 220 }}>
+                      <Typography fontWeight="bold" color="text.primary" noWrap>
+                        {r.student.name}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 180 }}>
+                      <Typography color="text.primary" noWrap>{r.course}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography color="text.primary">{r.startDate}</Typography>
+                    </TableCell>
+                    <TableCell>{getStatusChip(r.status)}</TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                      <ViewDetailsButton onClick={() => handleViewDetails(r)} />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
       {selectedRequest && (
@@ -231,7 +376,6 @@ return (
                   {getStatusChip(selectedRequest.status)}
                 </Box>
                 <Typography mt={2}><strong>Reason:</strong> {selectedRequest.reason}</Typography>
-                <Typography><strong>Details:</strong> {selectedRequest.details}</Typography>
 
                 {selectedRequest.status === "rejected" && selectedRequest.rejectionReason && (
                   <Box mt={2} p={2} bgcolor="error.light">

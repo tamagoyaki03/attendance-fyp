@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -11,6 +11,8 @@ import {
   Chip,
   Grid,
   Divider,
+  CircularProgress,
+  Alert,
 } from "@mui/material";
 import {
   ArrowDropDown,
@@ -21,38 +23,100 @@ import {
   PeopleAlt,
 } from "@mui/icons-material";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import supabase from "../../config/supabaseClient";
+import ViewDetailsButton from "../ViewDetailsButton";
+import { getDetailedAttendanceStats, calculateAttendanceRate } from "../../utils/attendanceUtils";
 
 export default function ClassAttendance({ classes }) {
   const [expanded, setExpanded] = useState(null);
+  const [attendanceData, setAttendanceData] = useState({});
+  const [loadingStates, setLoadingStates] = useState({});
+  const [classesData, setClassesData] = useState([]);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  const classesData = (classes || []).map((lecture) => {
-    const totalStudents = lecture.enrollment_lecture?.length || 0;
-    const present = Math.floor(totalStudents * 0.8);
-    const absent = Math.floor(totalStudents * 0.2);
-    const late = Math.floor(totalStudents * 0.1);
-    const rate = totalStudents > 0 ? ((present / totalStudents) * 100).toFixed(1) : 0;
-    return {
-      id: lecture.id,
-      code: lecture.course_code,
-      name: lecture.course_title,
-      lecturer: lecture.users?.name || "N/A",
-      time: `${lecture.lecture_start_time} - ${lecture.lecture_end_time}`,
-      location: lecture.lecture_location,
-      totalStudents,
-      presentCount: present,
-      absentCount: absent,
-      lateCount: late,
-      attendanceRate: rate,
-      fraudAlerts: Math.floor(Math.random() * 3),
+  // Load initial class data with real attendance rates
+  useEffect(() => {
+    const loadClassData = async () => {
+      if (!classes || classes.length === 0) {
+        setClassesData([]);
+        setIsInitialLoading(false);
+        return;
+      }
+
+      try {
+        const classDataWithStats = await Promise.all(
+          classes.map(async (lecture) => {
+            const attendanceRate = await calculateAttendanceRate(
+              lecture.id,
+              lecture.type || "Lecture"
+            );
+
+            return {
+              id: lecture.id,
+              code: lecture.course_code,
+              name: lecture.course_title,
+              lecturer: lecture.users?.name || "N/A",
+              time: `${lecture.lecture_start_time} - ${lecture.lecture_end_time}`,
+              location: lecture.lecture_location,
+              totalStudents: attendanceRate.totalStudents,
+              totalSessions: attendanceRate.totalSessions,
+              attendanceRate: Math.round(attendanceRate.attendanceRate * 10) / 10,
+              type: lecture.type || "Lecture",
+            };
+          })
+        );
+
+        setClassesData(classDataWithStats);
+      } catch (error) {
+        console.error("Error loading class data:", error);
+        setClassesData([]);
+      } finally {
+        setIsInitialLoading(false);
+      }
     };
-  });
 
-  const handleExpand = (id) => {
-    setExpanded(expanded === id ? null : id);
+    loadClassData();
+  }, [classes]);
+
+  const toggleExpand = async (classItem) => {
+    if (expanded?.id === classItem?.id) {
+      setExpanded(null);
+    } else {
+      setExpanded(classItem);
+
+      if (!attendanceData[classItem.id]) {
+        setLoadingStates((prev) => ({ ...prev, [classItem.id]: true }));
+
+        try {
+          const detailedStats = await getDetailedAttendanceStats(
+            classItem.id,
+            classItem.type
+          );
+          
+          setAttendanceData((prev) => ({
+            ...prev,
+            [classItem.id]: detailedStats,
+          }));
+        } catch (error) {
+          console.error("Error fetching detailed attendance data:", error);
+        } finally {
+          setLoadingStates((prev) => ({ ...prev, [classItem.id]: false }));
+        }
+      }
+    }
   };
 
-  if (!classes || classes.length === 0) {
+  if (isInitialLoading) {
+    return (
+      <Box p={2} textAlign="center">
+        <CircularProgress />
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          Loading classes...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (!classesData || classesData.length === 0) {
     return (
       <Box p={2}>
         <Typography color="text.secondary">No classes found for your account.</Typography>
@@ -63,7 +127,16 @@ export default function ClassAttendance({ classes }) {
   return (
     <Box display="flex" flexDirection="column" gap={2}>
       {classesData.map((item) => {
-        const numericRate = parseFloat(item.attendanceRate) || 0;
+        const attendanceDetails = attendanceData[item.id];
+        const isLoading = loadingStates[item.id];
+        const isExpanded = expanded?.id === item?.id;
+        
+        const getAttendanceColor = (rate) => {
+          if (rate >= 80) return "success";
+          if (rate >= 60) return "warning";
+          return "error";
+        };
+
         return (
           <Card
             className="border"
@@ -76,7 +149,7 @@ export default function ClassAttendance({ classes }) {
             }}
           >
             <CardHeader
-              onClick={() => handleExpand(item.id)}
+              onClick={() => toggleExpand(item)}
               sx={{
                 cursor: "pointer",
                 px: 3,
@@ -94,158 +167,140 @@ export default function ClassAttendance({ classes }) {
                     </Typography>
                   </Box>
 
-                  <Box display="flex" alignItems="center" gap={2}>
-                    {item.fraudAlerts > 0 && (
-                      <Chip
-                        icon={<WarningAmberIcon sx={{ fontSize: 16 }} />}
-                        label={`${item.fraudAlerts} Alerts`}
-                        color="error"
-                        size="small"
-                      />
-                    )}
-
-                    {numericRate < 60 && (
-                      <Chip
-                        label="Low Attendance"
-                        variant="outlined"
-                        size="small"
-                        sx={{ borderColor: "#f59e0b", color: "#f59e0b" }}
-                      />
-                    )}
-
-                    <Box textAlign="right" sx={{ minWidth: 72 }}>
-                      <Typography variant="subtitle1" color="text.primary">
-                        {item.attendanceRate}%
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Attendance Rate
-                      </Typography>
-                    </Box>
-
-                    {expanded === item.id ? (
-                      <ArrowDropUp sx={{ color: "text.secondary" }} />
+                  <Box display="flex" gap={1} alignItems="center">
+                    <Chip
+                      label={`${item.attendanceRate}%`}
+                      color={getAttendanceColor(item.attendanceRate)}
+                      size="small"
+                      sx={{ minWidth: "70px" }}
+                    />
+                    {isExpanded ? (
+                      <ArrowDropUp sx={{ color: "#64748b" }} />
                     ) : (
-                      <ArrowDropDown sx={{ color: "text.secondary" }} />
+                      <ArrowDropDown sx={{ color: "#64748b" }} />
                     )}
                   </Box>
                 </Box>
               }
             />
 
-            <Collapse in={expanded === item.id}>
-              <CardContent sx={{ background: "#ffffff" }}>
-                <Divider sx={{ mb: 2 }} />
-                <Grid container spacing={4}>
-                  <Grid item xs={12} md={6}>
-                    <Typography variant="subtitle2" mb={1} color="text.primary">
-                      Attendance Details
+            <Collapse in={isExpanded}>
+              <Divider />
+              <CardContent sx={{ pt: 3 }}>
+                {isLoading ? (
+                  <Box textAlign="center" py={3}>
+                    <CircularProgress />
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                      Loading attendance details...
                     </Typography>
-
-                    <Grid container spacing={1}>
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                          <PeopleAlt fontSize="small" /> Total Students
+                  </Box>
+                ) : attendanceDetails ? (
+                  <Box>
+                    {/* Overview Stats */}
+                    <Box
+                      display="grid"
+                      gridTemplateColumns={{ xs: "1fr 1fr", sm: "1fr 1fr 1fr 1fr" }}
+                      gap={2}
+                      mb={3}
+                    >
+                      <Box sx={{ p: 2, backgroundColor: "#f8fafc", borderRadius: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Total Students
                         </Typography>
-                        <Typography color="text.primary">{item.totalStudents}</Typography>
-                      </Grid>
-
-                      <Grid item xs={6}>
-                        <Typography variant="body2" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                          <Info fontSize="small" /> Late Check-ins
+                        <Typography variant="h6" fontWeight="bold">
+                          {attendanceDetails.totalStudents}
                         </Typography>
-                        <Typography color="text.primary">
-                          {item.lateCount} {item.totalStudents > 0 ? `(${((item.lateCount / item.totalStudents) * 100).toFixed(1)}%)` : ""}
-                        </Typography>
-                      </Grid>
-                    </Grid>
+                      </Box>
 
-                    <Box mt={2}>
-                      <Typography variant="body2" color="text.primary">Present</Typography>
+                      <Box sx={{ p: 2, backgroundColor: "#f0fdf4", borderRadius: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Present
+                        </Typography>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Typography variant="h6" fontWeight="bold" sx={{ color: "#22c55e" }}>
+                            {attendanceDetails.presentCount}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            ({attendanceDetails.totalStudents > 0 
+                              ? Math.round((attendanceDetails.presentCount / attendanceDetails.totalStudents) * 100)
+                              : 0}%)
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      <Box sx={{ p: 2, backgroundColor: "#fffbeb", borderRadius: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Late
+                        </Typography>
+                        <Typography variant="h6" fontWeight="bold" sx={{ color: "#f59e0b" }}>
+                          {attendanceDetails.lateCount}
+                        </Typography>
+                      </Box>
+
+                      <Box sx={{ p: 2, backgroundColor: "#fef2f2", borderRadius: 1 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Absent
+                        </Typography>
+                        <Typography variant="h6" fontWeight="bold" sx={{ color: "#ef4444" }}>
+                          {attendanceDetails.absentCount}
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    {/* Attendance Rate Progress */}
+                    <Box mb={3}>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                        <Typography variant="subtitle2" fontWeight="bold">
+                          Overall Attendance Rate
+                        </Typography>
+                        <Chip
+                          label={`${attendanceDetails.attendanceRate}%`}
+                          color={getAttendanceColor(attendanceDetails.attendanceRate)}
+                          size="small"
+                        />
+                      </Box>
                       <LinearProgress
                         variant="determinate"
-                        value={item.totalStudents > 0 ? (item.presentCount / item.totalStudents) * 100 : 0}
-                        color="success"
-                        sx={{ height: 6, borderRadius: 1, mt: 0.5 }}
+                        value={attendanceDetails.attendanceRate}
+                        sx={{
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: "#e2e8f0",
+                          "& .MuiLinearProgress-bar": {
+                            backgroundColor:
+                              attendanceDetails.attendanceRate >= 80
+                                ? "#22c55e"
+                                : attendanceDetails.attendanceRate >= 60
+                                ? "#f59e0b"
+                                : "#ef4444",
+                          },
+                        }}
                       />
-                      <Typography variant="caption" color="text.secondary">
-                        {item.presentCount} {item.totalStudents > 0 ? `(${((item.presentCount / item.totalStudents) * 100).toFixed(1)}%)` : ""}
+                    </Box>
+
+                    {/* Session Info */}
+                    <Box
+                      sx={{
+                        p: 2,
+                        backgroundColor: "#f8fafc",
+                        borderRadius: 1,
+                        mb: 3,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Typography variant="body2" color="text.secondary">
+                        Total Sessions Held
                       </Typography>
+                      <Chip label={attendanceDetails.totalSessions} />
                     </Box>
-
-                    <Box mt={2}>
-                      <Typography variant="body2" color="text.primary">Absent</Typography>
-                      <LinearProgress
-                        variant="determinate"
-                        value={item.totalStudents > 0 ? (item.absentCount / item.totalStudents) * 100 : 0}
-                        color="error"
-                        sx={{ height: 6, borderRadius: 1, mt: 0.5 }}
-                      />
-                      <Typography variant="caption" color="text.secondary">
-                        {item.absentCount} {item.totalStudents > 0 ? `(${((item.absentCount / item.totalStudents) * 100).toFixed(1)}%)` : ""}
-                      </Typography>
-                    </Box>
-                  </Grid>
-
-                  <Grid item xs={12} md={6}>
-                    <Typography variant="subtitle2" mb={1} color="text.primary">
-                      Class Information
-                    </Typography>
-                    <Box>
-                      <Typography variant="body2" color="text.secondary">Location:</Typography>
-                      <Typography color="text.primary">{item.location}</Typography>
-
-                      <Typography variant="body2" color="text.secondary" mt={1}>Time:</Typography>
-                      <Typography color="text.primary">{item.time}</Typography>
-
-                      <Typography variant="body2" color="text.secondary" mt={1}>Lecturer:</Typography>
-                      <Typography color="text.primary">{item.lecturer}</Typography>
-                    </Box>
-
-                    <Box mt={2} display="flex" gap={1} flexWrap="wrap">
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<Email />}
-                        onClick={() => alert("Reminder sent")}
-                        sx={{
-                          borderColor: "#e6edf3",
-                          color: "#0f172a",
-                          "&:hover": { backgroundColor: "rgba(15,23,42,0.04)" },
-                        }}
-                      >
-                        Send Reminders
-                      </Button>
-
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        startIcon={<Download />}
-                        onClick={() => alert("Data exported")}
-                        sx={{
-                          borderColor: "#e6edf3",
-                          color: "#0f172a",
-                          "&:hover": { backgroundColor: "rgba(15,23,42,0.04)" },
-                        }}
-                      >
-                        Export
-                      </Button>
-
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        href={`/classes/${item.id}`}
-                        startIcon={<Info />}
-                        sx={{
-                          borderColor: "#e6edf3",
-                          color: "#0f172a",
-                          "&:hover": { backgroundColor: "rgba(15,23,42,0.04)" },
-                        }}
-                      >
-                        View Details
-                      </Button>
-                    </Box>
-                  </Grid>
-                </Grid>
+                  </Box>
+                ) : (
+                  <Alert severity="info">
+                    No attendance data available for this class yet.
+                  </Alert>
+                )}
               </CardContent>
             </Collapse>
           </Card>
