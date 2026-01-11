@@ -103,37 +103,72 @@ export default function AttendanceIssues({ selectedClass }) {
     setDialogOpen(true);
   };
 
-  const handleUpdateStatus = async (id, newStatus) => {
-    if (newStatus === "resolved" && !resolutionNotes.trim()) {
+  const handleUpdateStatus = async (id) => {
+    if (!resolutionNotes.trim()) {
       alert("Please provide resolution notes to resolve the issue.");
       return;
     }
 
     try {
-      // Update in database
-      const { error } = await supabase
+      // Find the issue to get enrollment info
+      const issue = issues.find((i) => i.id === id);
+      if (!issue) throw new Error("Issue not found");
+
+      // Update issue as resolved
+      const { error: issueError } = await supabase
         .from("attendance_issues")
         .update({ 
-          status: newStatus, 
+          status: "resolved", 
           resolution_notes: resolutionNotes.trim(),
           updated_at: new Date().toISOString()
         })
         .eq("id", id);
+      if (issueError) throw issueError;
 
-      if (error) throw error;
+      // Insert new attendance_record as present
+      // Determine enrollment field and value
+      let enrollmentField = null;
+      let enrollmentId = null;
+      if (issue.enrollment_tutorial_id) {
+        enrollmentField = "tutorial_enrollment_id";
+        enrollmentId = issue.enrollment_tutorial_id;
+      } else if (issue.enrollment_lecture_id) {
+        enrollmentField = "lecture_enrollment_id";
+        enrollmentId = issue.enrollment_lecture_id;
+      }
+      if (enrollmentField && enrollmentId && issue.session_id && issue.user_id) {
+        // Check if already present
+        const { data: existing, error: checkError } = await supabase
+          .from("attendance_record")
+          .select("id")
+          .eq(enrollmentField, enrollmentId)
+          .eq("session_id", issue.session_id)
+          .maybeSingle();
+        if (!checkError && !existing) {
+          await supabase
+            .from("attendance_record")
+            .insert({
+              [enrollmentField]: enrollmentId,
+              session_id: issue.session_id,
+              user_id: issue.user_id,
+              status: "present",
+              created_at: new Date().toISOString(),
+              marked_manually: true
+            });
+        }
+      }
 
       // Update local state
       setIssues((prev) => prev.map((issue) => 
         issue.id === id 
           ? { 
               ...issue, 
-              status: newStatus, 
+              status: "resolved", 
               resolution_notes: resolutionNotes.trim(),
               updated_at: new Date().toISOString()
             } 
           : issue
       ));
-      
       setDialogOpen(false);
     } catch (error) {
       console.error("Error updating issue status:", error);
@@ -344,15 +379,8 @@ export default function AttendanceIssues({ selectedClass }) {
             <>
               <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
               <Button 
-                color="error" 
-                onClick={() => handleUpdateStatus(selectedIssue.id, "irresolvable")} 
-                startIcon={<Cancel />}
-              >
-                Mark Irresolvable
-              </Button>
-              <Button 
                 color="success" 
-                onClick={() => handleUpdateStatus(selectedIssue.id, "resolved")} 
+                onClick={() => handleUpdateStatus(selectedIssue.id)} 
                 startIcon={<CheckCircle />}
               >
                 Mark Resolved

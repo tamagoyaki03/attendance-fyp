@@ -28,6 +28,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
 
   const inputSx = {
     "& .MuiOutlinedInput-root": {
@@ -72,7 +73,8 @@ export default function LoginPage() {
         setMessage("Login successful, but failed to fetch user profile.");
       } else {
         const role = userProfile.role === "admin" ? "admin" : "lecturer";
-        sessionStorage.setItem(
+        const storage = rememberMe ? localStorage : sessionStorage;
+        storage.setItem(
           "user",
           JSON.stringify({ id: userProfile.id, name: userProfile.name, role })
         );
@@ -170,6 +172,8 @@ export default function LoginPage() {
                     color: "#0f172a",
                     "&.Mui-checked": { color: "#0f172a" },
                   }}
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
                 />
               }
               label={<span style={{ color: "#0f172a" }}>Remember me for 30 days</span>}

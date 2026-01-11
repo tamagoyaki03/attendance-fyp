@@ -213,7 +213,7 @@ export default function AbsenceReportsTab() {
                     <TableRow key={idx}>
                       <TableCell>{row.class}</TableCell>
                       <TableCell>{row.totalAbsences}</TableCell>
-                      <TableCell>{row.excused}</TableCell>
+                      <TableCell>{typeof row.excused === 'number' ? row.excused : String(row.excused).charAt(0).toUpperCase() + String(row.excused).slice(1)}</TableCell>
                       <TableCell>{row.unexcused}</TableCell>
                       <TableCell>{row.lastAbsence}</TableCell>
                     </TableRow>

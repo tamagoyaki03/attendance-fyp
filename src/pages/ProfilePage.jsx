@@ -141,7 +141,7 @@ export default function ProfilePage() {
               </Typography>
               <Divider sx={{ marginBottom: "20px" }} />
               <Grid container spacing={2}>
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <TextField
                     disabled
                     fullWidth
@@ -153,7 +153,7 @@ export default function ProfilePage() {
                   />
                 </Grid>
 
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <TextField
                     disabled
                     fullWidth
@@ -165,7 +165,7 @@ export default function ProfilePage() {
                   />
                 </Grid>
 
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <TextField
                     disabled
                     fullWidth

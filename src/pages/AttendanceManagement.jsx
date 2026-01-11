@@ -1,3 +1,4 @@
+import { sendAbsenceEmailsAfterLectureEnd } from "../utils/sendAbsenceAfterLectureEnd";
 import React, { useState, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom";
 import { Alert, AlertTitle, Chip, Card, CardContent, Typography, TextField, InputAdornment } from "@mui/material";
@@ -34,15 +35,18 @@ import * as XLSX from 'xlsx';
 import { sendAbsenceNotificationEmails, getEmailSettings } from "../utils/emailUtils";
 
 const DAY_NUMBER_TO_NAME = {
+  0: "Sunday",
   1: "Monday",
   2: "Tuesday",
   3: "Wednesday",
   4: "Thursday",
   5: "Friday",
   6: "Saturday",
+  7: "Sunday", 
 };
 
 export default function AttendanceManagementPage() {
+  const user = JSON.parse(sessionStorage.getItem("user")) || {};
   const router = useNavigate()
   const location = useLocation();
 
@@ -67,7 +71,6 @@ export default function AttendanceManagementPage() {
   const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
   const [userRole, setUserRole] = useState("");
   const [userName, setUserName] = useState("");
-  const user = JSON.parse(sessionStorage.getItem("user")) || {};
   const [enrolledStudents, setEnrolledStudents] = useState([]);
   const [currentSessionPassword, setCurrentSessionPassword] = useState(null);
   const [showStudentDetails, setShowStudentDetails] = useState(false);
@@ -79,6 +82,25 @@ export default function AttendanceManagementPage() {
   const [todayAttendanceData, setTodayAttendanceData] = useState({ present: [], absent: [] });
   const [canStartAttendance, setCanStartAttendance] = useState(false);
   const [timeValidationMessage, setTimeValidationMessage] = useState('');
+
+  useEffect(() => {
+    const handler = () => {
+      if (selectedClass) {
+        checkTodayAttendance();
+        fetchTodayAttendanceData(currentAttendanceId);
+      }
+    };
+    window.addEventListener('attendance-updated', handler);
+    return () => window.removeEventListener('attendance-updated', handler);
+  }, [selectedClass, currentAttendanceId]);
+  // Send absence emails after lecture_end_time is reached
+  useEffect(() => {
+    if (!user?.id) return;
+    const interval = setInterval(() => {
+      sendAbsenceEmailsAfterLectureEnd(user.id);
+    }, 60 * 1000); // check every 1 minute
+    return () => clearInterval(interval);
+  }, [user?.id]);
 
   const handleOnlineProceed = async ({ recordingLink, quizContent }) => {
   setOnlineDialogOpen(false);
@@ -246,7 +268,8 @@ export default function AttendanceManagementPage() {
         users (
           id,
           name,
-          email
+          email,
+          matric_number
         )
       `)
       .eq(enrollmentField, selectedClass.id);
@@ -300,51 +323,122 @@ export default function AttendanceManagementPage() {
       return;
     }
 
-    // Get attendance records for this week's session
+    // Get attendance records for this week's session, including flag_reason
     const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
-    
-    const { data: attendanceRecords, error: attendanceError } = await supabase
-      .from("attendance_record")
-      .select(`${attendanceField}, status, created_at`)
-      .eq("session_id", weekSession.id);
+    // Defensive: Only query if weekSession.id is defined
+    let attendanceRecords = [];
+    let attendanceError = null;
+    if (weekSession && weekSession.id) {
+      const result = await supabase
+        .from("attendance_record")
+        .select(`${attendanceField}, status, created_at, marked_manually, flag_reason, latitude, longitude`)
+        .eq("session_id", weekSession.id);
+      attendanceRecords = result.data;
+      attendanceError = result.error;
+    }
+    if (attendanceError) throw attendanceError;
 
     if (attendanceError) throw attendanceError;
 
+
+    // Fetch class location from course_lecture or course_tutorial
+    let classLocation = null;
+    try {
+      if (selectedClass.type === "Tutorial") {
+        const { data, error } = await supabase
+          .from("course_tutorial")
+          .select("latitude, longitude, tutorial_location")
+          .eq("id", selectedClass.id)
+          .single();
+        if (!error && data) {
+          classLocation = {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            location: data.tutorial_location
+          };
+        }
+      } else {
+        const { data, error } = await supabase
+          .from("course_lecture")
+          .select("latitude, longitude, lecture_location")
+          .eq("id", selectedClass.id)
+          .single();
+        if (!error && data) {
+          classLocation = {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            location: data.lecture_location
+          };
+        }
+      }
+    } catch (e) {
+      classLocation = null;
+    }
+
     // Categorize students based on week's attendance
+
     const presentStudents = [];
     const absentStudents = [];
+    const excusedStudents = [];
+    const flaggedStudents = [];
+    const allStudents = [];
 
     enrollments.forEach(enrollment => {
       const student = {
         ...enrollment.users,
         student_id: enrollment.student_id,
-        enrollmentId: enrollment.id
+        matric_number: enrollment.users?.matric_number,
+        enrollmentId: enrollment.id,
+        lecture_enrollment_id: selectedClass.type === "Lecture" ? enrollment.id : undefined,
+        tutorial_enrollment_id: selectedClass.type === "Tutorial" ? enrollment.id : undefined
       };
-      
       // Find attendance record using enrollment ID
       const attendanceRecord = attendanceRecords.find(
         record => record[attendanceField] === enrollment.id
       );
-
-      if (attendanceRecord && attendanceRecord.status === 'present') {
-        presentStudents.push({
-          ...student,
-          status: 'present',
-          checkInTime: attendanceRecord.created_at,
-          sessionDate: weekSession.created_at // Add session date for reference
-        });
+      let status = 'absent';
+      let checkInTime = undefined;
+      let marked_manually = undefined;
+      let flag_reason = undefined;
+      let latitude = undefined;
+      let longitude = undefined;
+      if (attendanceRecord) {
+        status = attendanceRecord.status;
+        checkInTime = attendanceRecord.created_at;
+        marked_manually = attendanceRecord.marked_manually;
+        flag_reason = attendanceRecord.flag_reason;
+        if (typeof attendanceRecord.latitude === 'number') latitude = attendanceRecord.latitude;
+        if (typeof attendanceRecord.longitude === 'number') longitude = attendanceRecord.longitude;
+      }
+      const studentObj = {
+        ...student,
+        status,
+        checkInTime,
+        marked_manually,
+        flag_reason,
+        latitude,
+        longitude,
+        sessionDate: weekSession.created_at
+      };
+      allStudents.push(studentObj);
+      // Always push a new object to avoid reference issues
+      if (flag_reason) {
+        flaggedStudents.push({ ...studentObj, classLocation });
+      } else if (status === 'present') {
+        presentStudents.push({ ...studentObj });
+      } else if (status === 'excused') {
+        excusedStudents.push({ ...studentObj });
       } else {
-        absentStudents.push({
-          ...student,
-          status: 'absent',
-          sessionDate: weekSession.created_at // Add session date for reference
-        });
+        absentStudents.push({ ...studentObj });
       }
     });
 
     setTodayAttendanceData({
       present: presentStudents,
-      absent: absentStudents
+      absent: absentStudents,
+      excused: excusedStudents,
+      flagged: flaggedStudents,
+      all: allStudents
     });
 
     // Update counts
@@ -372,10 +466,19 @@ const validateAttendanceTime = () => {
 
   let expectedJsDay;
   if (typeof classDay === 'number') {
-    expectedJsDay = classDay; 
+    // Support both 0-6 (JS) and 1-7 (ISO-style with Sunday=7)
+    expectedJsDay = classDay % 7;
   } else {
-    const dayMap = { "Monday": 1, "Tuesday": 2, "Wednesday": 3, "Thursday": 4, "Friday": 5 };
-    expectedJsDay = dayMap[classDay] || 0;
+    const dayMap = {
+      "Sunday": 0,
+      "Monday": 1,
+      "Tuesday": 2,
+      "Wednesday": 3,
+      "Thursday": 4,
+      "Friday": 5,
+      "Saturday": 6,
+    };
+    expectedJsDay = dayMap[classDay] ?? 0;
   }
 
   // Check if today is the correct day
@@ -521,12 +624,16 @@ const renderTodayAttendanceStatus = () => {
 
 // Replace the renderAttendanceList function:
 const renderAttendanceList = () => {
-  const allStudents = [...todayAttendanceData.present, ...todayAttendanceData.absent];
-  
-  // Add mock excused and flagged students for demonstration
-  // In real implementation, this data should come from your database
-  const excusedStudents = allStudents.filter(s => s.isExcused || s.excuse_reason);
-  const flaggedStudents = allStudents.filter(s => s.isFlagged || s.flag_reason);
+  const allStudents = [
+    ...(todayAttendanceData.present || []),
+    ...(todayAttendanceData.absent || []),
+    ...(todayAttendanceData.excused || []),
+    ...(todayAttendanceData.flagged || [])
+  ];
+  const flaggedStudents = (todayAttendanceData.flagged || []);
+  const excusedStudents = todayAttendanceData.excused || [];
+  const presentList = (todayAttendanceData.present || []).filter(s => s.status === 'present');
+  const absentList = (todayAttendanceData.absent || []).filter(s => s.status === 'absent');
 
   if (allStudents.length === 0) {
     return (
@@ -547,13 +654,13 @@ const renderAttendanceList = () => {
   }}
 >
         <Tab 
-          label={`Present (${todayAttendanceData.present.length})`} 
+          label={`Present (${(todayAttendanceData.present || []).length})`} 
           value="present"
           icon={<CheckCircleIcon fontSize="small" />}
           iconPosition="start"
         />
         <Tab 
-          label={`Absent (${todayAttendanceData.absent.length})`} 
+          label={`Absent (${(todayAttendanceData.absent || []).length})`} 
           value="absent"
           icon={<CancelIcon fontSize="small" />}
           iconPosition="start"
@@ -565,7 +672,7 @@ const renderAttendanceList = () => {
           iconPosition="start"
         />
         <Tab 
-          label={`Flagged (${flaggedStudents.length})`} 
+          label={`Flagged (${(todayAttendanceData.flagged || []).length})`} 
           value="flagged"
           icon={<FlagIcon fontSize="small" />}
           iconPosition="start"
@@ -576,21 +683,21 @@ const renderAttendanceList = () => {
         {/* Present Tab */}
         {activeTab === 'present' && (
           <Box>
-            {todayAttendanceData.present.map((student) => (
+            {(todayAttendanceData.present || []).map((student) => (
               <Card key={student.id} sx={{ mb: 1, border: '1px solid #4caf50' }}>
                 <CardContent sx={{ py: 1 }}>
                   <Box display="flex" justifyContent="space-between" alignItems="center">
                     <Box>
                       <Typography fontWeight="bold">{student.name}</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        Student ID: {student.student_id || 'N/A'} • {student.email}
+                        {student.email}
                       </Typography>
                     </Box>
                     <Box textAlign="right" display="flex" alignItems="center" gap={2}>
                       <Box textAlign="center">
                         <Chip label="Present" color="success" size="small" />
                         <Typography variant="caption" display="block">
-                          {student.checkInTime ? new Date(student.checkInTime).toLocaleTimeString() : 'N/A'}
+                          {student.checkInTime ? (student.checkInTime.match(/T(\d{2}:\d{2}:\d{2})/) ? student.checkInTime.match(/T(\d{2}:\d{2}:\d{2})/)[1] : student.checkInTime) : 'N/A'}
                         </Typography>
                       </Box>
                       <ViewDetailsButton onClick={() => handleSelectStudent({
@@ -609,20 +716,20 @@ const renderAttendanceList = () => {
         {/* Absent Tab */}
         {activeTab === 'absent' && (
           <Box>
-            {todayAttendanceData.absent.length === 0 ? (
+            {(todayAttendanceData.absent || []).length === 0 ? (
               <Typography variant="body2" color="text.secondary" textAlign="center" py={4}>
                 No absent students for this week.
               </Typography>
             ) : (
               <>
-              {todayAttendanceData.absent.map((student) => (
+              {(todayAttendanceData.absent || []).map((student) => (
                 <Card key={student.id} sx={{ mb: 1, border: '1px solid #f44336' }}>
                   <CardContent sx={{ py: 1 }}>
                     <Box display="flex" justifyContent="space-between" alignItems="center">
                       <Box>
                         <Typography fontWeight="bold">{student.name}</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          Student ID: {student.student_id || 'N/A'} • {student.email}
+                          {student.email}
                         </Typography>
                         {student.sessionDate && (
                           <Typography variant="caption" display="block" color="text.secondary">
@@ -641,7 +748,7 @@ const renderAttendanceList = () => {
                         variant="outlined"
                         size="small"
                         color="success"
-                        onClick={() => handleMarkPresent(student.student_id)}
+                        onClick={() => handleMarkPresent(student.matric_number)}
                       >
                         Mark Present
                       </Button>
@@ -655,7 +762,7 @@ const renderAttendanceList = () => {
                 </CardContent>
               </Card>
             ))}
-            </>
+              </>
             )}
           </Box>
         )}
@@ -675,7 +782,7 @@ const renderAttendanceList = () => {
                       <Box>
                         <Typography fontWeight="bold">{student.name}</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          Student ID: {student.student_id || 'N/A'} • {student.email}
+                          {student.email}
                         </Typography>
                         <Typography variant="caption" display="block" color="info.main">
                           Reason: {student.excuse_reason || "Medical excuse"}
@@ -688,9 +795,6 @@ const renderAttendanceList = () => {
                           size="small" 
                           icon={<EventNoteIcon />}
                         />
-                        <Typography variant="caption" display="block">
-                          Status: {student.status || 'Not marked'}
-                        </Typography>
                       </Box>
                     </Box>
                   </CardContent>
@@ -700,53 +804,28 @@ const renderAttendanceList = () => {
           </Box>
         )}
 
-        {/* Flagged Tab */}
-        {activeTab === 'flagged' && (
-          <Box>
-            {flaggedStudents.length === 0 ? (
-              <Typography variant="body2" color="text.secondary" textAlign="center" py={4}>
-                No students have been flagged for this session.
-              </Typography>
-            ) : (
-              flaggedStudents.map((student) => (
-                <Card key={student.id} sx={{ mb: 1, border: '1px solid', borderColor: 'error.main' }}>
-                  <CardContent sx={{ py: 1 }}>
-                    <Box display="flex" justifyContent="space-between" alignItems="center">
-                      <Box>
-                        <Typography fontWeight="bold">{student.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Student ID: {student.student_id || 'N/A'} • {student.email}
-                        </Typography>
-                        <Typography variant="caption" display="block" color="error.main">
-                          Flag reason: {student.flag_reason || "Attendance pattern concern"}
-                        </Typography>
-                      </Box>
-                      <Box textAlign="right">
-                        <Chip 
-                          label="Flagged" 
-                          color="error" 
-                          size="small" 
-                          icon={<FlagIcon />}
-                        />
-                        <Typography variant="caption" display="block">
-                          Status: {student.status || 'Not marked'}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-            
-            {flaggedStudents.length > 0 && (
-              <Box mt={2} p={2} bgcolor="error.light" borderRadius={1}>
-                <Typography variant="body2" color="error.dark">
-                  ⚠️ These students require immediate attention for attendance patterns or behavior concerns
-                </Typography>
-              </Box>
-            )}
-          </Box>
-        )}
+         {/* Flagged Tab */}
+         {activeTab === 'flagged' && (
+           (() => {
+             console.log('classAttendance', classAttendance);
+             // Combine date and start_time if both exist, else fallback to start_time
+             let sessionStartTime = classAttendance?.start_time;
+             if (classAttendance?.date && classAttendance?.start_time) {
+               sessionStartTime = `${classAttendance.date}T${classAttendance.start_time}`;
+             }
+             const sessionInfo = { sessionId: currentAttendanceId, start_time: sessionStartTime };
+             console.log('sessionInfo passed to FlaggedAttendanceList', sessionInfo);
+             return (
+               <FlaggedAttendanceList
+                 students={todayAttendanceData.flagged || []}
+                 session={selectedClass}
+                 sessionInfo={sessionInfo}
+                 onRefresh={() => fetchTodayAttendanceData(currentAttendanceId)}
+                 handleMarkPresent={handleMarkPresent}
+               />
+             );
+           })()
+         )}
       </Box>
     </Box>
   );
@@ -758,6 +837,11 @@ const handleSelectStudent = async (student) => {
     try {
       // Get attendance record for this student and current session
       if (currentAttendanceId && student.enrollmentId) {
+        if (!currentAttendanceId || !student.enrollmentId) {
+          setSelectedStudent(student);
+          setShowStudentDetails(true);
+          return;
+        }
         const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
         
         console.log("Fetching attendance record for:", {
@@ -1295,12 +1379,24 @@ const handleChooseMode = async (mode) => {
       }
 
       // Create attendance session payload - explicitly set both columns
+      // Get local time in Asia/Kuala_Lumpur for created_at with +08:00 offset
+      const now = new Date();
+      const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
+      const pad = (n) => n.toString().padStart(2, '0');
+      const year = localDate.getFullYear();
+      const month = pad(localDate.getMonth() + 1);
+      const day = pad(localDate.getDate());
+      const hour = pad(localDate.getHours());
+      const minute = pad(localDate.getMinutes());
+      const second = pad(localDate.getSeconds());
+      const createdAt = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
       const insertData = {
         latitude: location.lat,
         longitude: location.lng,
         attendance_password: specialPassword,
         course_lecture_id: null,
         course_tutorial_id: null,
+        created_at: createdAt,
       };
 
       // Determine type and set ONLY the correct column
@@ -1347,7 +1443,7 @@ const handleChooseMode = async (mode) => {
 
   // 2. Fetch attendance data by session id (attendance_session table)
   useEffect(() => {
-    if (!currentAttendanceId || !sessionActive)  return;
+    if (!currentAttendanceId) return;
     const fetchClassAttendance = async () => {
       const { data, error } = await supabase
         .from("attendance_session")
@@ -1358,9 +1454,12 @@ const handleChooseMode = async (mode) => {
       else setClassAttendance(null);
     };
     fetchClassAttendance();
-    // Optionally poll for updates
-    const interval = setInterval(fetchClassAttendance, 5000);
-    return () => clearInterval(interval);
+    // Optionally poll for updates if sessionActive
+    let interval = null;
+    if (sessionActive) {
+      interval = setInterval(fetchClassAttendance, 5000);
+    }
+    return () => { if (interval) clearInterval(interval); };
   }, [currentAttendanceId, sessionActive]);
 
   const handleEndSession = async () => {
@@ -1473,54 +1572,122 @@ const handleChooseMode = async (mode) => {
   };
 
   const handleMarkPresent = async (studentId) => {
-  if (!currentAttendanceId) {
-    setSnackbar({
-      open: true,
-      message: "No active attendance session found.",
-      severity: "error"
-    });
-    return;
-  }
-
-  try {
-    // Find the student's enrollment
-    const student = todayAttendanceData.absent.find(s => s.student_id === studentId);
-    if (!student) {
-      throw new Error("Student not found in absent list");
+    if (!currentAttendanceId) {
+      setSnackbar({
+        open: true,
+        message: "No active attendance session found.",
+        severity: "error"
+      });
+      return;
     }
 
-    const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
+    try {
+      // Try to find the student in all lists using all possible ID fields
+      const matchFn = s => (
+        s.matric_number === studentId ||
+        s.studentId === studentId ||
+        s.id === studentId ||
+        (typeof studentId === 'number' && s.id === Number(studentId))
+      );
+      let student = null;
+      if (todayAttendanceData.absent) {
+        student = todayAttendanceData.absent.find(matchFn);
+      }
+      if (!student && todayAttendanceData.flagged) {
+        student = todayAttendanceData.flagged.find(matchFn);
+      }
+      if (!student && todayAttendanceData.present) {
+        student = todayAttendanceData.present.find(matchFn);
+      }
+      if (!student && todayAttendanceData.all) {
+        student = todayAttendanceData.all.find(matchFn);
+      }
+      if (!student && enrolledStudents) {
+        student = enrolledStudents.find(matchFn);
+      }
+      if (!student) {
+        throw new Error("Student not found in class list");
+      }
 
-    // Insert or update attendance record
-    const { error } = await supabase
-      .from("attendance_record")
-      .upsert({
-        [attendanceField]: student.enrollmentId,
-        session_id: currentAttendanceId,
-        status: 'present',
-        created_at: new Date().toISOString()
+      const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
+      const enrollmentId = student.enrollmentId || student.enrollment_id;
+
+      // Set created_at to local time in Asia/Kuala_Lumpur
+      const now = new Date();
+      // Format as 'YYYY-MM-DD HH:mm:ss' in Asia/Kuala_Lumpur
+      const localTime = now.toLocaleString('sv-SE', { timeZone: 'Asia/Kuala_Lumpur', hour12: false });
+      // Convert to ISO 8601 format (replace space with T)
+      const createdAt = localTime.replace(' ', 'T');
+
+      // Find the existing attendance record for this student and session
+      // Defensive: Only query if both enrollmentId and currentAttendanceId are defined
+      let attendanceRecords = [];
+      let attendanceError = null;
+      if (enrollmentId && currentAttendanceId) {
+        const result = await supabase
+          .from("attendance_record")
+          .select("id")
+          .eq(attendanceField, enrollmentId)
+          .eq("session_id", currentAttendanceId);
+        attendanceRecords = result.data;
+        attendanceError = result.error;
+      }
+
+      if (attendanceError || !attendanceRecords || attendanceRecords.length === 0) {
+        // If student is in absent list, allow upsert (create new record)
+        const isAbsent = todayAttendanceData.absent && todayAttendanceData.absent.some(s => s.matric_number === student.matric_number);
+        if (isAbsent) {
+          // Set created_at to local time in Asia/Kuala_Lumpur
+          const now = new Date();
+          const localTime = now.toLocaleString('sv-SE', { timeZone: 'Asia/Kuala_Lumpur', hour12: false });
+          const createdAt = localTime.replace(' ', 'T');
+          if (enrollmentId && currentAttendanceId) {
+            const { error: upsertError } = await supabase
+              .from("attendance_record")
+              .upsert({
+                [attendanceField]: enrollmentId,
+                session_id: currentAttendanceId,
+                status: 'present',
+                marked_manually: true,
+                created_at: createdAt
+              });
+            if (upsertError) throw upsertError;
+          } else {
+            setSnackbar({ open: true, message: 'Missing enrollment or session ID', severity: 'error' });
+            throw new Error('Missing enrollment or session ID');
+          }
+        } else {
+          setSnackbar({ open: true, message: 'Attendance record not found', severity: 'error' });
+          throw new Error('Attendance record not found');
+        }
+      } else {
+        const attendanceId = attendanceRecords[0].id;
+        // Update the attendance record to present and marked_manually
+        const { error } = await supabase
+          .from("attendance_record")
+          .update({ status: 'present', marked_manually: true })
+          .eq("id", attendanceId);
+        if (error) throw error;
+      }
+
+      // Refresh the attendance data
+      await fetchTodayAttendanceData(currentAttendanceId);
+
+      setSnackbar({
+        open: true,
+        message: `${student.name || 'Student'} has been manually marked as present (manual).`,
+        severity: "success"
       });
 
-    if (error) throw error;
-
-    // Refresh the attendance data
-    await fetchTodayAttendanceData(currentAttendanceId);
-
-    setSnackbar({
-      open: true,
-      message: `${student.name} has been manually marked as present.`,
-      severity: "success"
-    });
-
-  } catch (error) {
-    console.error("Error marking student present:", error);
-    setSnackbar({
-      open: true,
-      message: "Failed to mark student as present. Please try again.",
-      severity: "error"
-    });
-  }
-};
+    } catch (error) {
+      console.error("Error marking student present:", error);
+      setSnackbar({
+        open: true,
+        message: "Failed to mark student as present. Please try again.",
+        severity: "error"
+      });
+    }
+  };
 
   const handleGenerateClassReport = async () => {
   if (!selectedClass) return;
@@ -1859,14 +2026,6 @@ const handleChooseMode = async (mode) => {
          </Box>
        )}
 
-        <Box my={3}>
-          <Card sx={{ p: 2, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
-            <Typography variant="body2" color="text.secondary">
-              Live sessions: {sessionActive ? "1 active" : "No active sessions"}
-            </Typography>
-          </Card>
-        </Box>
-
         {!selectedClass && (
           <div className="grid grid-cols-3 gap-[20px] mt-6">
            <Card
@@ -2020,16 +2179,10 @@ const handleChooseMode = async (mode) => {
                       Class Attendance List
                     </Typography>
                     <StudentAttendanceList
-                      classData={{
-                        ...selectedClass,
-                        statusFilter: "all",
-                        classAttendanceId: currentAttendanceId,
-                        students: todayAttendanceData && (todayAttendanceData.present.length > 0 || todayAttendanceData.absent.length > 0) ? [
-                          ...todayAttendanceData.present.map(s => ({ ...s, status: 'present' })),
-                          ...todayAttendanceData.absent.map(s => ({ ...s, status: 'absent' }))
-                        ] : enrolledStudents.map(s => ({ ...s, status: 'not_marked' }))
-                      }}
+                      classData={selectedClass}
+                      sessionId={currentAttendanceId}
                       onSelectStudent={handleSelectStudent}
+                      onFlagged={() => fetchTodayAttendanceData(currentAttendanceId)}
                     />
                   </CardContent>
                 </Card>

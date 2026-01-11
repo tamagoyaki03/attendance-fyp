@@ -11,7 +11,7 @@ import {
 import Sidebar from "../components/Sidebar";
 import AttendanceReportsTab from "../components/AttendanceReportsTab";
 import AbsenceReportsTab from "../components/AbsenceReportsTab";
-import FraudReportsTab from "../components/FraudReportsTab";
+import FraudTable from "../components/FraudTable";
 import ReportGenerator from "../components/Event/ReportGenerator";
 
 export default function ReportsPage() {
@@ -112,7 +112,7 @@ export default function ReportsPage() {
                 subheader={<Typography variant="body2" color="text.secondary">Investigate potential fraud and suspicious activity.</Typography>}
               />
               <CardContent>
-                <FraudReportsTab />
+                <FraudTable />
               </CardContent>
             </Card>
           )}

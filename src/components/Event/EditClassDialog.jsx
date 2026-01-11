@@ -278,7 +278,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       const courseTable = isLecture ? "course_lecture" : "course_tutorial";
       const enrollmentTable = isLecture ? "enrollment_lecture" : "enrollment_tutorial";
       const courseIdField = isLecture ? "course_id" : "tutorial_id";
-      
+      const enrollmentIdField = isLecture ? "id" : "id";
+
       const dayNumber = {
         "Monday": 1,
         "Tuesday": 2,
@@ -321,15 +322,49 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         return;
       }
 
-      // Update student enrollments
-      await supabase.from(enrollmentTable).delete().eq(courseIdField, classData.id);
+      // --- Enrollment update logic ---
+      // 1. Fetch current enrollments
+      const { data: currentEnrollments, error: fetchEnrollError } = await supabase
+        .from(enrollmentTable)
+        .select(`id, student_id`)
+        .eq(courseIdField, classData.id);
+      if (fetchEnrollError) {
+        console.error("Error fetching current enrollments:", fetchEnrollError);
+        setIsLoading(false);
+        alert("An error occurred while updating enrollments. Please try again.");
+        return;
+      }
+      const currentStudentIds = currentEnrollments.map(e => e.student_id);
+      const newStudentIds = formData.students.map(s => s.id);
 
-      if (formData.students.length > 0) {
-        const enrollments = formData.students.map(student => ({
-          student_id: student.id,
+      // 2. Calculate students to add and remove
+      const toAdd = newStudentIds.filter(id => !currentStudentIds.includes(id));
+      // If newStudentIds is empty, toRemove should be all currentEnrollments
+      const toRemove = currentEnrollments.filter(e => !newStudentIds.includes(e.student_id));
+
+      // 3. Only insert new enrollments
+      if (toAdd.length > 0) {
+        const enrollments = toAdd.map(student_id => ({
+          student_id,
           [courseIdField]: classData.id
         }));
         await supabase.from(enrollmentTable).insert(enrollments);
+      }
+
+      // 4. Only delete enrollments that are not referenced in attendance_record
+      for (const enrollment of toRemove) {
+        // Check for attendance_record referencing this enrollment
+        const attendanceField = isLecture ? "lecture_enrollment_id" : "tutorial_enrollment_id";
+        const { data: attnRecords, error: attnError } = await supabase
+          .from('attendance_record')
+          .select('id')
+          .eq(attendanceField, enrollment.id)
+          .limit(1);
+        if (!attnError && (!attnRecords || attnRecords.length === 0)) {
+          // Safe to delete
+          await supabase.from(enrollmentTable).delete().eq('id', enrollment.id);
+        }
+        // If referenced, skip deletion to avoid 409 error
       }
 
       setIsLoading(false);

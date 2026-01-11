@@ -11,8 +11,6 @@ export default function AttendanceStats({
   classData, 
   presentCount = 0, 
   absentCount = 0,
-  excusedCount = 0,
-  flaggedCount = 0 
 }) {
 
   // Add loading check
@@ -34,8 +32,6 @@ export default function AttendanceStats({
   const total = Array.isArray(classData?.students) ? classData.students.length : 0;
   const attendanceRate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
   const absenceRate = total > 0 ? Math.round((absentCount / total) * 100) : 0;
-  const excusedRate = total > 0 ? Math.round((excusedCount / total) * 100) : 0;
-  const flaggedRate = total > 0 ? Math.round((flaggedCount / total) * 100) : 0;
 
   const cardSx = {
     flex: 1,

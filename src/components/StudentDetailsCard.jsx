@@ -13,6 +13,7 @@ import LocationOnIcon from "@mui/icons-material/LocationOn";
 import QuizIcon from "@mui/icons-material/Quiz";
 import PlayCircleIcon from "@mui/icons-material/PlayCircle";
 import TryIcon from "@mui/icons-material/Try";
+import FlagIcon from "@mui/icons-material/Flag";
 import supabase from "../config/supabaseClient";
 import * as XLSX from 'xlsx';
 
@@ -75,17 +76,29 @@ export default function StudentDetailsCard({ student, open, onClose, onMarkPrese
         const formattedHistory = records
           .filter(record => sessions.some(s => s.id === record.session_id)) // Only include records with valid sessions
           .map(record => {
-          const session = sessions.find(s => s.id === record.session_id);
-          const sessionDate = session ? (session.date || session.created_at) : record.created_at;
+            const session = sessions.find(s => s.id === record.session_id);
+            const sessionDate = session ? (session.date || session.created_at) : record.created_at;
 
-          return {
-            date: new Date(sessionDate).toLocaleDateString(),
-            status: record.status,
-            checkInTime: record.created_at ? new Date(record.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
-            sessionId: record.session_id,
-            notes: record.notes
-        };
-      });
+            // Format date and check-in time in UTC
+            const formatUtcDate = (dateString) => {
+              if (!dateString) return "-";
+              const date = new Date(dateString);
+              return date.toLocaleDateString("en-US", { timeZone: "UTC", year: "numeric", month: "short", day: "numeric" });
+            };
+            const formatUtcTime = (dateString) => {
+              if (!dateString) return null;
+              const date = new Date(dateString);
+              return date.toLocaleTimeString("en-US", { timeZone: "UTC", hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC";
+            };
+
+            return {
+              date: formatUtcDate(sessionDate),
+              status: record.status,
+              checkInTime: formatUtcTime(record.created_at),
+              sessionId: record.session_id,
+              notes: record.notes
+            };
+          });
 
        setAttendanceHistory(formattedHistory);
      } catch (error) {
@@ -304,9 +317,18 @@ export default function StudentDetailsCard({ student, open, onClose, onMarkPrese
         return <Chip label="Tardy" color="warning" />;
       case "absent":
         return <Chip label="Absent" color="error" variant="outlined" />;
+      case "flagged":
+        return <Chip label="Flagged" color="error" variant="filled" icon={<FlagIcon />} />;
       default:
-        return null;
+        return status ? <Chip label={status} /> : null;
     }
+  };
+
+  // Helper to format UTC time
+  const formatUtcTime = (dateString) => {
+    if (!dateString) return "-";
+    const date = new Date(dateString);
+    return date.toLocaleString("en-US", { timeZone: "UTC", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC";
   };
 
   return (
@@ -344,7 +366,7 @@ export default function StudentDetailsCard({ student, open, onClose, onMarkPrese
               <Box minWidth={0}>
                 <Typography variant="h6" fontWeight="bold" noWrap>{student.name}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  ID: {student.studentId} • {student.email}
+                  Matric No: {student.matric_number} • {student.email}
                 </Typography>
                 <Box mt={1}>{getStatusBadge(student.status)}</Box>
               </Box>
@@ -354,7 +376,7 @@ export default function StudentDetailsCard({ student, open, onClose, onMarkPrese
                   <>
                     <Box display="flex" alignItems="center" gap={1} justifyContent="flex-end">
                       <AccessTimeIcon fontSize="small" color="action" />
-                      <Typography variant="body2">{student.checkInTime}</Typography>
+                      <Typography variant="body2">{formatUtcTime(student.checkInTime)}</Typography>
                     </Box>
                     {student.checkInLocation && (
                       <Box display="flex" alignItems="center" gap={1} justifyContent="flex-end" mt={1}>
@@ -394,7 +416,7 @@ export default function StudentDetailsCard({ student, open, onClose, onMarkPrese
                         <Box>
                          <Typography variant="body2" color="text.secondary">Check-in Time</Typography>
                          <Typography variant="body1" fontWeight="bold">
-                           {new Date(student.attendanceRecord.created_at).toLocaleString()}
+                           {formatUtcTime(student.attendanceRecord.created_at)}
                          </Typography>
                        </Box>
                        <Box>
@@ -564,7 +586,7 @@ export default function StudentDetailsCard({ student, open, onClose, onMarkPrese
                               {record.date}
                             </Typography>
                             <Typography variant="caption" color="text.secondary">
-                              {record.checkInTime ? `Check-in: ${record.checkInTime}` : "No check-in"}
+                              {record.checkInTime ? `Check-in: ${formatUtcTime(record.checkInTime)}` : "No check-in"}
                             </Typography>
                             {record.notes && (
                               <Typography variant="caption" display="block" color="text.secondary">
@@ -592,15 +614,6 @@ export default function StudentDetailsCard({ student, open, onClose, onMarkPrese
           Close
         </Button>
         <Box display="flex" gap={1}>
-          {student?.status === "absent" && (
-            <Button 
-              variant="contained" 
-              onClick={() => onMarkPresent(student.studentId)}
-              startIcon={<CheckCircleIcon />}
-            >
-              Mark Present
-            </Button>
-          )}
           <Button 
             variant="outlined" 
             onClick={handleGenerateReport} 

@@ -81,26 +81,55 @@ export default function SignupPage() {
 
   const handleCreateAccount = async (e) => {
     e.preventDefault();
+    console.log("Form submitted");
     setMessage("");
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      console.log("Form validation failed");
+      return;
+    }
+    console.log("Form validation passed, creating account...");
     setIsLoading(true);
-    const { data, error } = await supabase.auth.signUp({
-      email: formData.email,
-      password: formData.password,
-      options: {
-        data: {
-          name: formData.name,
-          role: formData.role,
+    
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: {
+          data: {
+            name: formData.name,
+            role: formData.role,
+          },
         },
-      },
-    });
-    setIsLoading(false);
-    if (error) {
-      setMessage(error.message);
-    } else {
-      setUserId(data?.user?.id || null);
-      setShowOtpInput(true);
-      setMessage("A verification code has been sent to your email. Please enter it below.");
+      });
+      
+      console.log("Supabase response:", { data, error });
+      setIsLoading(false);
+      
+      if (error) {
+        console.error("Signup error:", error);
+        setMessage(error.message);
+      } else if (data?.user) {
+        console.log("User created:", data.user);
+        setUserId(data.user.id);
+        
+        // Check if email confirmation is required
+        if (data.user.identities && data.user.identities.length === 0) {
+          setMessage("This email is already registered. Please log in instead.");
+        } else if (data.user.confirmed_at) {
+          setMessage("Account created successfully! Redirecting to login...");
+          setTimeout(() => navigate("/"), 1800);
+        } else {
+          setShowOtpInput(true);
+          setMessage("A verification code has been sent to your email. Please enter it below.");
+        }
+      } else {
+        console.warn("No error but no user data:", data);
+        setMessage("Something went wrong. Please try again.");
+      }
+    } catch (err) {
+      console.error("Unexpected error:", err);
+      setIsLoading(false);
+      setMessage("Network error. Please check your connection and try again.");
     }
   };
 

@@ -53,15 +53,21 @@ export default function LeaveRequestList({ onChanged }) {
   const fetchLeaveRequests = async () => {
     setLoading(true);
 
-    const [leaveRes, usersRes, lectureRes, tutorialRes] = await Promise.all([
-      supabase.from("leave_requests").select("*"),
-      supabase.from("users").select("id, name"),
-      supabase.from("course_lecture").select("id, course_code, course_title"),
-      supabase.from("course_tutorial").select("id, course_code, course_title"),
-    ]);
+    // Get logged-in lecturer
+    const lecturer = JSON.parse(sessionStorage.getItem("user") || "null");
+    if (!lecturer?.id) {
+      setRequests([]);
+      setLoading(false);
+      return;
+    }
 
-    const leaveRequests = leaveRes.data || [];
-    const users = usersRes.data || [];
+    // Fetch all courses for this lecturer
+    const [lectureRes, tutorialRes] = await Promise.all([
+      supabase.from("course_lecture").select("id, course_code, course_title").eq("lecturer_id", lecturer.id),
+      supabase.from("course_tutorial").select("id, course_code, course_title").eq("lecturer_id", lecturer.id),
+    ]);
+    const lectureIds = (lectureRes.data || []).map(c => String(c.id));
+    const tutorialIds = (tutorialRes.data || []).map(c => String(c.id));
     const courseMap = new Map();
     (lectureRes.data || []).forEach((c) => {
       courseMap.set(String(c.id), c.course_code || c.course_title || "");
@@ -70,8 +76,25 @@ export default function LeaveRequestList({ onChanged }) {
       courseMap.set(String(c.id), c.course_code || c.course_title || "");
     });
 
-    if (leaveRes.error || usersRes.error || lectureRes.error || tutorialRes.error) {
-      console.error("Error fetching leave requests:", leaveRes.error || usersRes.error || lectureRes.error || tutorialRes.error);
+    // Fetch leave requests only for courses taught by this lecturer
+    let leaveRequests = [];
+    if (lectureIds.length + tutorialIds.length > 0) {
+      const [leaveLectureRes, leaveTutorialRes] = await Promise.all([
+        lectureIds.length > 0 ? supabase.from("leave_requests").select("*").in("course_id", lectureIds) : { data: [] },
+        tutorialIds.length > 0 ? supabase.from("leave_requests").select("*").in("course_id", tutorialIds) : { data: [] },
+      ]);
+      leaveRequests = [
+        ...(leaveLectureRes.data || []),
+        ...(leaveTutorialRes.data || []),
+      ];
+    }
+
+    // Fetch users for enrichment
+    const usersRes = await supabase.from("users").select("id, name");
+    const users = usersRes.data || [];
+
+    if (usersRes.error || lectureRes.error || tutorialRes.error) {
+      console.error("Error fetching leave requests:", usersRes.error || lectureRes.error || tutorialRes.error);
       setSnackbar({ open: true, message: "Error loading data" });
       setLoading(false);
       return;
@@ -79,7 +102,6 @@ export default function LeaveRequestList({ onChanged }) {
 
     const enriched = leaveRequests.map((item) => {
       const user = users.find((u) => u.id === item.user_id);
-
       return {
         ...item,
         student: {
@@ -181,9 +203,19 @@ export default function LeaveRequestList({ onChanged }) {
             const inserts = [];
             for (const s of sessions) {
               if (s.course_lecture_id && lecEnrollMap.has(s.course_lecture_id)) {
-                inserts.push({ session_id: s.id, lecture_enrollment_id: lecEnrollMap.get(s.course_lecture_id), status: "excused" });
+                inserts.push({
+                  session_id: s.id,
+                  lecture_enrollment_id: lecEnrollMap.get(s.course_lecture_id),
+                  status: "excused",
+                  created_at: new Date().toISOString(), // store in UTC
+                });
               } else if (s.course_tutorial_id && tutEnrollMap.has(s.course_tutorial_id)) {
-                inserts.push({ session_id: s.id, tutorial_enrollment_id: tutEnrollMap.get(s.course_tutorial_id), status: "excused" });
+                inserts.push({
+                  session_id: s.id,
+                  tutorial_enrollment_id: tutEnrollMap.get(s.course_tutorial_id),
+                  status: "excused",
+                  created_at: new Date().toISOString(), // store in UTC
+                });
               }
             }
             if (inserts.length > 0) {

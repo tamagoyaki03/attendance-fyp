@@ -24,11 +24,8 @@ export default function FraudDetectionChart({ timeRange = "30days" }) {
     const fetchFraudData = async () => {
       setLoading(true);
       try {
-        // Placeholder: Generate sample fraud data based on time range
-        // TODO: Replace with actual fraud detection table queries when available
         const today = new Date();
         let startDate;
-
         switch (timeRange) {
           case "7days":
             startDate = subDays(today, 7);
@@ -45,14 +42,28 @@ export default function FraudDetectionChart({ timeRange = "30days" }) {
           default:
             startDate = subDays(today, 30);
         }
-
+        // Get all days in the interval
         const days = eachDayOfInterval({ start: startDate, end: today });
-        const mockData = days.map((day) => ({
-          date: format(day, "MMM d"),
-          attempts: Math.floor(Math.random() * 10) + 5, // Random between 5-15
+        // Query fraud_detection_alerts table for alerts in the date range
+        const { data, error } = await supabase
+          .from('fraud_detection_alerts')
+          .select('created_at')
+          .gte('created_at', format(startDate, 'yyyy-MM-dd'))
+          .lte('created_at', format(today, 'yyyy-MM-dd'));
+        if (error) {
+          throw error;
+        }
+        // Count fraud attempts per day
+        const attemptsByDate = {};
+        (data || []).forEach(alert => {
+          const dateStr = format(new Date(alert.created_at), 'MMM d');
+          attemptsByDate[dateStr] = (attemptsByDate[dateStr] || 0) + 1;
+        });
+        const chartData = days.map(day => ({
+          date: format(day, 'MMM d'),
+          attempts: attemptsByDate[format(day, 'MMM d')] || 0
         }));
-
-        setFraudData(mockData);
+        setFraudData(chartData);
       } catch (error) {
         console.error("Error fetching fraud data:", error);
         setFraudData([]);
@@ -60,7 +71,6 @@ export default function FraudDetectionChart({ timeRange = "30days" }) {
         setLoading(false);
       }
     };
-
     fetchFraudData();
   }, [timeRange]);
 

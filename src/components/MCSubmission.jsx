@@ -19,7 +19,8 @@ import {
   Snackbar,
   Alert,
   Paper,
-  CircularProgress
+  CircularProgress,
+  TextField
 } from "@mui/material";
 import {
   Visibility,
@@ -36,6 +37,9 @@ export default function MCSubmissions({ onChanged }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectSubmitting, setRejectSubmitting] = useState(false);
 
   const formatDate = (d) => {
     if (!d) return "";
@@ -224,12 +228,9 @@ export default function MCSubmissions({ onChanged }) {
       // Extract enrollment info from submission
       const sessionId = submission.sessionId;
       const studentId = submission.studentId;
-      
-      // Determine if this is a lecture or tutorial enrollment
       const isLecture = submission.enrollmentType === 'lecture';
-      
-      // Fetch the enrollment record to get the enrollment ID
       let enrollmentId = null;
+      let enrollmentDebug = {};
       if (isLecture) {
         const { data: enrollment, error: enrollError } = await supabase
           .from('enrollment_lecture')
@@ -237,7 +238,8 @@ export default function MCSubmissions({ onChanged }) {
           .eq('student_id', studentId)
           .eq('course_id', submission.courseId)
           .single();
-        if (enrollError) console.warn('Lecture enrollment fetch error:', enrollError);
+        enrollmentDebug = { type: 'lecture', studentId, courseId: submission.courseId, result: enrollment, error: enrollError };
+        if (enrollError) console.warn('Lecture enrollment fetch error:', enrollError, enrollmentDebug);
         enrollmentId = enrollment?.id;
       } else {
         const { data: enrollment, error: enrollError } = await supabase
@@ -246,31 +248,81 @@ export default function MCSubmissions({ onChanged }) {
           .eq('student_id', studentId)
           .eq('tutorial_id', submission.courseId)
           .single();
-        if (enrollError) console.warn('Tutorial enrollment fetch error:', enrollError);
+        enrollmentDebug = { type: 'tutorial', studentId, tutorialId: submission.courseId, result: enrollment, error: enrollError };
+        if (enrollError) console.warn('Tutorial enrollment fetch error:', enrollError, enrollmentDebug);
         enrollmentId = enrollment?.id;
       }
 
-      // Insert attendance_record with "excused" status if enrollment found
+      // Insert or update attendance_record with "excused" status if enrollment found
       if (enrollmentId) {
-        const attendanceRecord = {
-          session_id: sessionId,
-          status: 'excused'
-        };
+        // Get current date and time in Asia/Kuala_Lumpur (GMT+8)
+        const now = new Date();
+        const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
+        const pad = (n) => n.toString().padStart(2, '0');
+        const year = localDate.getFullYear();
+        const month = pad(localDate.getMonth() + 1);
+        const day = pad(localDate.getDate());
+        const hour = pad(localDate.getHours());
+        const minute = pad(localDate.getMinutes());
+        const second = pad(localDate.getSeconds());
+        const createdAt = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
+
+        // Build attendance_record filter
+        let attendanceFilter = { session_id: sessionId };
         if (isLecture) {
-          attendanceRecord.lecture_enrollment_id = enrollmentId;
+          attendanceFilter.lecture_enrollment_id = enrollmentId;
         } else {
-          attendanceRecord.tutorial_enrollment_id = enrollmentId;
+          attendanceFilter.tutorial_enrollment_id = enrollmentId;
         }
 
-        const { error: insertError } = await supabase
+        // Check if attendance_record already exists
+        const { data: existing, error: fetchError } = await supabase
           .from('attendance_record')
-          .insert([attendanceRecord]);
-        
-        if (insertError) {
-          console.warn('Failed to insert excused attendance record:', insertError);
-        } else {
-          console.log('Excused attendance record created successfully');
+          .select('id')
+          .match(attendanceFilter)
+          .maybeSingle();
+        if (fetchError) {
+          console.error('Error checking for existing attendance_record:', fetchError, attendanceFilter);
         }
+
+        if (existing && existing.id) {
+          // Update existing record to excused
+          const { error: updateError } = await supabase
+            .from('attendance_record')
+            .update({ status: 'excused', created_at: createdAt })
+            .eq('id', existing.id);
+          if (updateError) {
+            console.error('Failed to update attendance_record to excused:', updateError, attendanceFilter);
+            setSnackbar({ open: true, message: `Failed to update attendance to excused: ${updateError.message || 'Unknown error'}`, severity: "error" });
+          } else {
+            console.log('Attendance_record updated to excused:', attendanceFilter);
+          }
+        } else {
+          // Insert new excused record
+          const attendanceRecord = {
+            session_id: sessionId,
+            status: 'excused',
+            created_at: createdAt
+          };
+          if (isLecture) {
+            attendanceRecord.lecture_enrollment_id = enrollmentId;
+          } else {
+            attendanceRecord.tutorial_enrollment_id = enrollmentId;
+          }
+          const { error: insertError } = await supabase
+            .from('attendance_record')
+            .insert([attendanceRecord]);
+          if (insertError) {
+            console.error('Failed to insert attendance_record:', insertError, attendanceRecord);
+            setSnackbar({ open: true, message: `Failed to insert excused attendance: ${insertError.message || 'Unknown error'}`, severity: "error" });
+          } else {
+            console.log('Excused attendance_record inserted:', attendanceRecord);
+          }
+        }
+      } else {
+        // Enrollment not found, show warning
+        console.warn('No enrollment found for MC approval:', enrollmentDebug);
+        setSnackbar({ open: true, message: "No enrollment found for this student in the course. Excused attendance not recorded.", severity: "warning" });
       }
 
       setSubmissions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "Approved" } : s)));
@@ -279,8 +331,13 @@ export default function MCSubmissions({ onChanged }) {
         setSelectedSubmission((prev) => (prev ? { ...prev, status: "Approved" } : null));
       }
       setSnackbar({ open: true, message: "MC submission approved successfully", severity: "success" });
-      // Notify parent to refresh Absence tab data
-      try { onChanged && onChanged(); } catch (e) { /* no-op */ }
+
+      // Notify parent to refresh Absence tab data and attendance management
+      try { onChanged && onChanged(); } catch (e) {}
+      // Also trigger a window event for attendance management refresh
+      try {
+        window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { sessionId, studentId } }));
+      } catch (e) {}
     } catch (e) {
       console.error('Approve failed:', e);
       setSnackbar({ open: true, message: `Failed to approve: ${e.message || 'Unknown error'}`, severity: "error" });
@@ -289,29 +346,105 @@ export default function MCSubmissions({ onChanged }) {
     }
   };
 
-  const handleReject = async (id) => {
+  const handleReject = async (id, reasonNote = "") => {
     try {
-      const { error } = await supabase
+      const submission = submissions.find(s => s.id === id);
+      if (!submission) {
+        console.error('Submission not found');
+        setSnackbar({ open: true, message: "Submission not found", severity: "error" });
+        return;
+      }
+
+      // Update mc_submissions status to rejected
+      const { error: updateError } = await supabase
         .from('mc_submissions')
         .update({ status: 'rejected' })
         .eq('id', id);
-      if (error) {
-        console.error('Reject error:', error);
-        throw error;
+      if (updateError) {
+        console.error('Update error:', updateError);
+        const errorMsg = updateError.message || updateError.code || 'Unknown error';
+        throw new Error(`Failed to update mc_submissions: ${errorMsg}`);
       }
+
+      // Fetch student contact info
+      const { data: userInfo, error: userError } = await supabase
+        .from('users')
+        .select('email, name, matric_number')
+        .eq('id', submission.studentId)
+        .single();
+      if (userError) {
+        console.warn('Failed to fetch user info for email:', userError);
+      }
+
+      const lecturer = JSON.parse(sessionStorage.getItem('user') || 'null');
+      const toEmail = userInfo?.email;
+      const studentName = userInfo?.name || submission.student || submission.studentId;
+      const studentId = submission.studentId;
+
+      if (toEmail) {
+        const courseLabel = submission.course || 'Course';
+        const absenceDateLabel = submission.date || new Date().toLocaleDateString();
+        const reasonText = submission.reason ? `<p><strong>Submitted Reason:</strong> ${submission.reason}</p>` : '';
+        const lecturerReason = reasonNote && reasonNote.trim() ? `<p><strong>Lecturer's Reason:</strong> ${reasonNote.trim()}</p>` : '';
+
+        const html = `
+          <div style="font-family: Arial, sans-serif; color:#0f172a;">
+            <p>Dear ${studentName},</p>
+            <p>Your absence document for <strong>${courseLabel}</strong> on <strong>${absenceDateLabel}</strong> has been <span style="color:#ef4444; font-weight:bold;">rejected</span>.</p>
+            ${reasonText}
+            ${lecturerReason}
+            <p>Please review the submission requirements and resubmit with a valid Medical Certificate (MC) or Absence Letter if applicable.</p>
+            <p>If you believe this is a mistake, kindly contact your lecturer or the Student Affairs Office.</p>
+            <br/>
+            <p>Regards,<br/>Attendance Management System</p>
+          </div>
+        `;
+
+        try {
+          const { error: fnError } = await supabase.functions.invoke('send-absence-email', {
+            body: {
+              emails: [{
+                to: toEmail,
+                subject: `Absence Document Rejected - ${courseLabel}`,
+                html,
+                studentId,
+                studentName,
+              }],
+              lecturerId: lecturer?.id || null,
+            },
+          });
+          if (fnError) {
+            console.error('Email function error:', fnError);
+            setSnackbar({ open: true, message: 'Document rejected, but email failed to send.', severity: 'warning' });
+          } else {
+            setSnackbar({ open: true, message: 'Document rejected and email sent to student.', severity: 'success' });
+          }
+        } catch (e) {
+          console.error('Invoke email function failed:', e);
+          setSnackbar({ open: true, message: 'Document rejected, but email failed to send.', severity: 'warning' });
+        }
+      } else {
+        setSnackbar({ open: true, message: 'Document rejected. No student email found.', severity: 'warning' });
+      }
+
+      // Update local state
       setSubmissions((prev) => prev.map((s) => (s.id === id ? { ...s, status: "Rejected" } : s)));
-      // Update selected submission if it's the one being rejected
       if (selectedSubmission?.id === id) {
         setSelectedSubmission((prev) => (prev ? { ...prev, status: "Rejected" } : null));
       }
-      setSnackbar({ open: true, message: "MC submission rejected successfully", severity: "success" });
-      // Notify parent to refresh Absence tab data
-      try { onChanged && onChanged(); } catch (e) { /* no-op */ }
+
+      // Notify parent and broadcast event
+      try { onChanged && onChanged(); } catch (_) {}
+      try {
+        window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { sessionId: submission.sessionId, studentId } }));
+      } catch (_) {}
+
     } catch (e) {
       console.error('Reject failed:', e);
-      setSnackbar({ open: true, message: `Failed to reject: ${e.message || 'Unknown error'}`, severity: "error" });
+      setSnackbar({ open: true, message: `Failed to reject: ${e.message || 'Unknown error'}`, severity: 'error' });
     } finally {
       setDialogOpen(false);
+      setRejectDialogOpen(false);
     }
   };
 
@@ -335,10 +468,25 @@ export default function MCSubmissions({ onChanged }) {
     }
   };
 
-  const handleViewDetails = (submission) => {
-    setSelectedSubmission(submission);
+  const handleViewDetails = async (submission) => {
     setTabValue(0);
     setDialogOpen(true);
+    let matric = null;
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("matric_number")
+        .eq("id", submission.studentId)
+        .maybeSingle();
+      if (!error && data) {
+        matric = data.matric_number || null;
+      }
+    } catch (_) {}
+
+    setSelectedSubmission({
+      ...submission,
+      matric_number: matric || submission.matric_number || submission.studentId,
+    });
   };
 
   const rows = submissions;
@@ -462,7 +610,7 @@ export default function MCSubmissions({ onChanged }) {
               {tabValue === 0 && (
                 <Box mt={2}>
                   <Typography><strong>Student:</strong> {selectedSubmission.student}</Typography>
-                  <Typography><strong>Student ID:</strong> {selectedSubmission.studentId}</Typography>
+                  <Typography><strong>Student ID:</strong> {selectedSubmission.matric_number || selectedSubmission.studentId}</Typography>
                   <Typography><strong>Course:</strong> {selectedSubmission.course}</Typography>
                   <Typography mt={2}><strong>Absence Date:</strong> {selectedSubmission.date}</Typography>
                   <Typography><strong>Submission Date:</strong> {selectedSubmission.submissionDate}</Typography>
@@ -524,7 +672,7 @@ export default function MCSubmissions({ onChanged }) {
             color="error"
             variant="outlined"
             startIcon={<Cancel />}
-            onClick={() => handleReject(selectedSubmission?.id)}
+            onClick={() => { setRejectReason(""); setRejectDialogOpen(true); }}
             sx={{ borderColor: "#e6edf3", color: "#ef4444" }}
           >
             Reject
@@ -546,6 +694,47 @@ export default function MCSubmissions({ onChanged }) {
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {/* Reject Reason Dialog */}
+      <Dialog open={rejectDialogOpen} onClose={() => !rejectSubmitting && setRejectDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Reject Absence Document</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Optionally provide a reason to help the student understand the rejection.
+          </Typography>
+          <TextField
+            label="Reason (optional)"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            fullWidth
+            multiline
+            minRows={3}
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRejectDialogOpen(false)} disabled={rejectSubmitting} variant="outlined" sx={{ borderColor: "#e6edf3", color: "#0f172a" }}>
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            startIcon={<Cancel />}
+            disabled={rejectSubmitting}
+            onClick={async () => {
+              if (!selectedSubmission?.id) return;
+              try {
+                setRejectSubmitting(true);
+                await handleReject(selectedSubmission.id, rejectReason);
+              } finally {
+                setRejectSubmitting(false);
+              }
+            }}
+          >
+            {rejectSubmitting ? 'Rejecting…' : 'Confirm Reject'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

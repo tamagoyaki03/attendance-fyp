@@ -68,7 +68,7 @@ export default function SubmitAbsenceDocumentPage() {
             const { data, error } = await supabase
               .from('attendance_session')
               .select(`
-                course_lecture (
+                course_lecture:course_lecture_id (
                   course_code,
                   course_title
                 )

@@ -19,24 +19,44 @@ import Button from "../Button";
 import supabase from "../../config/supabaseClient";
 import { startFraudMonitoring, stopFraudMonitoring } from "../../utils/fraudUtils";
 
+
+import { sendAbsenceEmailsAfterLectureEnd } from "../../utils/sendAbsenceAfterLectureEnd";
 async function saveSessionPassword(sessionId, password) {
   if (sessionId && password) {
     try {
-      // Get current date and time
+      // Get current date and time in Asia/Kuala_Lumpur
       const now = new Date();
-      const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD format
-      const currentTime = now.toTimeString().split(' ')[0]; // HH:MM:SS format
-      
+      // Get local time in Asia/Kuala_Lumpur
+      const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
+      // Format YYYY-MM-DD
+      const currentDate = localDate.toISOString().split('T')[0];
+      // Format HH:MM:SS
+      const currentTime = localDate.toTimeString().split(' ')[0];
+      // created_at as local time (Asia/Kuala_Lumpur, with offset)
+      // Build ISO string with +08:00 offset
+      const pad = (n) => n.toString().padStart(2, '0');
+      const year = localDate.getFullYear();
+      const month = pad(localDate.getMonth() + 1);
+      const day = pad(localDate.getDate());
+      const hour = pad(localDate.getHours());
+      const minute = pad(localDate.getMinutes());
+      const second = pad(localDate.getSeconds());
+      const createdAt = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
+
       // Calculate end time (assuming 2-hour sessions, adjust as needed)
-      const endDateTime = new Date(now.getTime() + (2 * 60 * 60 * 1000)); // Add 2 hours
-      const endTime = endDateTime.toTimeString().split(' ')[0];
-      
+      const endDateTime = new Date(localDate.getTime() + (2 * 60 * 60 * 1000));
+      const endHour = pad(endDateTime.getHours());
+      const endMinute = pad(endDateTime.getMinutes());
+      const endSecond = pad(endDateTime.getSeconds());
+      const endTimeStr = `${endHour}:${endMinute}:${endSecond}`;
+
       console.log("Saving session data:", {
         sessionId,
         password,
         date: currentDate,
         start_time: currentTime,
-        end_time: endTime
+        end_time: endTimeStr,
+        created_at: createdAt
       });
 
       // Add timeout to the database query
@@ -47,13 +67,14 @@ async function saveSessionPassword(sessionId, password) {
             attendance_password: password,
             date: currentDate,
             start_time: currentTime,
+            created_at: createdAt
           })
           .eq("id", sessionId),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Query timeout')), 10000)
         )
       ]);
-      
+
       if (error) {
         console.error("Error updating session password:", error);
       } else {
@@ -71,8 +92,15 @@ async function saveSessionPassword(sessionId, password) {
 async function updateSessionEndTime(sessionId) {
   if (sessionId) {
     try {
+      // Get current date and time in Asia/Kuala_Lumpur
       const now = new Date();
-      const endTime = now.toTimeString().split(' ')[0]; // HH:MM:SS format
+      const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
+      // Format HH:MM:SS
+      const pad = (n) => n.toString().padStart(2, '0');
+      const endHour = pad(localDate.getHours());
+      const endMinute = pad(localDate.getMinutes());
+      const endSecond = pad(localDate.getSeconds());
+      const endTime = `${endHour}:${endMinute}:${endSecond}`;
 
       console.log("Updating session end time:", {
         sessionId,
@@ -108,71 +136,67 @@ export default function AttendanceSession({
   sessionType,
   classData,
   onFinalize,
-  onExpire,
   sessionPassword,
   sessionId,
-  requireQrToEnd,
-  setRequireQrToEnd,
 }) {
   const [qrValue, setQrValue] = useState("");
-  const [countdown, setCountdown] = useState(300);
   const [isExpired, setIsExpired] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [location, setLocation] = useState(null);
   const creatingSession = useRef(false);
   const fraudChannelRef = useRef(null);
 
-  const handleContinueSession = () => {
-    if (onClose && typeof onClose === 'function') {
-      onClose(false);
+  // End attendance, update end_time, and send absence emails
+  const handleEndAttendance = async () => {
+    await updateSessionEndTime(sessionId);
+    
+    // Get current user (lecturer) from sessionStorage
+    const user = JSON.parse(sessionStorage.getItem("user") || "{}");
+    if (user?.id) {
+      // Send absence emails immediately after ending session
+      await sendAbsenceEmailsAfterLectureEnd(user.id);
+    }
+    
+    if (onFinalize) {
+      onFinalize();
+    }
+    if (onClose) {
+      onClose();
     }
   };
 
-  const handleSessionExpire = async () => {
-   console.log("Session expired - updating end time");
-   await updateSessionEndTime(sessionId);
-   setIsExpired(true);
-   if (onExpire) {
-     onExpire();
-   }
- };
+  // Check if session has ended based on DB end_time
+  const checkSessionExpired = async () => {
+    if (!sessionId) return;
+    try {
+      const { data: session, error } = await supabase
+        .from("attendance_session")
+        .select("end_time, date")
+        .eq("id", sessionId)
+        .single();
+      
+      if (error || !session) return;
+      
+      if (session.end_time && session.date) {
+        const endDateTime = new Date(`${session.date}T${session.end_time}`);
+        if (new Date() > endDateTime) {
+          setIsExpired(true);
+        }
+      }
+    } catch (e) {
+      console.warn("Error checking session expiry:", e);
+    }
+  };
 
- const handleFinalizeSession = async () => {
-   console.log("Finalizing session - updating end time");
-   await updateSessionEndTime(sessionId);
-   if (onFinalize) {
-     onFinalize();
-   }
-   onClose();
- };
-
- const handleEndSession = async () => {
-   if (requireQrToEnd) {
-     // If QR is required, show QR code for check-out
-     console.log("QR required for ending session");
-     // The session will end when QR is scanned (handled by parent component)
-   } else {
-     // If no QR required, end session immediately
-     console.log("Ending session immediately (no QR required)");
-     await updateSessionEndTime(sessionId);
-     if (onFinalize) {
-       onFinalize();
-     }
-     onClose();
-   }
- };
-
-// Auto-expire timer
+// Check session expiry from database
 useEffect(() => {
-  if (sessionType === "start" && sessionId && !isExpired) {
-    // Set session to expire after 2 hours (7200000 ms)
-    const expireTimer = setTimeout(() => {
-      handleSessionExpire();
-    }, 2 * 60 * 60 * 1000); // 2 hours
-
-    return () => clearTimeout(expireTimer);
+  if (open && sessionId) {
+    checkSessionExpired();
+    // Poll every 10 seconds to check if session has ended
+    const interval = setInterval(checkSessionExpired, 10000);
+    return () => clearInterval(interval);
   }
-}, [sessionType, sessionId, isExpired]);
+}, [open, sessionId]);
 
   // Generate a QR code when the dialog opens
   useEffect(() => {
@@ -221,7 +245,6 @@ useEffect(() => {
           const qrString = `${type}|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
           console.log("Generating QR with string:", qrString);
           setQrValue(qrString);
-          setCountdown(300);
           setIsExpired(false);
 
           if (sessionId && sessionPassword) {
@@ -231,8 +254,21 @@ useEffect(() => {
           // Start fraud monitoring (location + time analysis) for this session
           try {
             if (sessionId) {
-              // Default options: 1.0 km max distance, 5 minutes time buffer
-              const channel = await startFraudMonitoring(sessionId, { maxKm: 1.0, timeBufferMinutes: 5 });
+              // Fetch admin-configured fraud detection settings
+              const { data: settings, error: settingsError } = await supabase
+                .from("fraud_detection_settings")
+                .select("max_distance_km, time_buffer_minutes")
+                .limit(1)
+                .single();
+              
+              if (settingsError || !settings) {
+                console.warn("Could not fetch fraud detection settings, using defaults:", settingsError);
+              }
+              
+              const maxKm = settings?.max_distance_km || 1.0;
+              const timeBufferMinutes = settings?.time_buffer_minutes || 5;
+              
+              const channel = await startFraudMonitoring(sessionId, { maxKm, timeBufferMinutes });
               fraudChannelRef.current = channel;
             }
           } catch (e) {
@@ -282,40 +318,6 @@ useEffect(() => {
     };
   }, [open]);
 
-  // Add countdown timer effect
-  useEffect(() => {
-    let timer;
-    
-    if (open && countdown > 0 && !isExpired) {
-      timer = setInterval(() => {
-        setCountdown((prevCountdown) => {
-          if (prevCountdown <= 1) {
-            setIsExpired(true);
-            if (onExpire && typeof onExpire === 'function') {
-              onExpire();
-            }
-            return 0;
-          }
-          return prevCountdown - 1;
-        });
-      }, 1000);
-    }
-
-    return () => {
-      if (timer) {
-        clearInterval(timer);
-      }
-    };
-  }, [open, isExpired, sessionType, onExpire]);
-
-  // Also add this effect to reset countdown when dialog opens
-  useEffect(() => {
-    if (open && sessionType === "start") {
-      setCountdown(300); // 5 minutes
-      setIsExpired(false);
-    }
-  }, [open, sessionType]);
-
   // Update the render condition - remove location requirement
   if (!open || !classData || !qrValue) {
     return null;
@@ -324,7 +326,7 @@ useEffect(() => {
   return (
     <Dialog
       open={open}
-      onClose={handleContinueSession}
+      onClose={onClose}
       maxWidth="sm"
       PaperProps={{
         sx: {
@@ -372,11 +374,6 @@ useEffect(() => {
                     </Box>
                   )}
                 </Box>
-                {/* <Chip
-                  label={<Box display="flex" alignItems="center"><AccessTimeIcon sx={{ fontSize: 16, mr: 0.5 }} />Expires in {formatTime(countdown)}</Box>}
-                  color={countdown < 60 ? "error" : "success"}
-                  sx={{ position: "absolute", top: -12, right: 0 }}
-                /> */}
               </>
             )}
           </Box>
@@ -409,23 +406,11 @@ useEffect(() => {
           </Box>
         </Box>
 
-        {sessionType === "start" && (
-          <FormControlLabel
-            control={<Checkbox checked={requireQrToEnd} onChange={(e) => setRequireQrToEnd(e.target.checked)} />}
-            label="Require QR code to end attendance session"
-          />
-        )}
+        {/* Removed require QR code to end attendance session UI */}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, py: 2 }}>
-        {sessionType === "start" ? (
-          <>
-            <Button onClick={handleContinueSession} variant="outlined">Continue Session</Button>
-            <Button onClick={handleEndSession} variant="contained" color="error">End Attendance</Button>
-          </>
-        ) : (
-          <Button onClick={handleFinalizeSession} variant="contained">Finalize Session</Button>
-        )}
+        <Button onClick={handleEndAttendance} variant="contained" color="error">End Attendance</Button>
       </DialogActions>
     </Dialog>
   );

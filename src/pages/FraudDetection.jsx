@@ -1,4 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import Snackbar from '@mui/material/Snackbar';
+import MuiAlert from '@mui/material/Alert';
 import {
   Box,
   Card,
@@ -18,9 +20,74 @@ import FraudTable from "../components/FraudTable";
 import supabase from "../config/supabaseClient";
 
 export default function FraudDetection() {
+
   const [searchTerm, setSearchTerm] = useState("");
-  const [distance, setDistance] = useState(1.0);
-  // No course selection – analysis applies to all sessions
+  const [distance, setDistance] = useState(null);
+  const [buffer, setBuffer] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [settingsId, setSettingsId] = useState(null);
+  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
+
+  // Fetch current settings and user role on mount
+  useEffect(() => {
+    const fetchSettings = async () => {
+      setLoading(true);
+      setDistance(null);
+      setBuffer(null);
+      // Fetch settings (single row)
+      const { data, error } = await supabase
+        .from("fraud_detection_settings")
+        .select("id, max_distance_km, time_buffer_minutes")
+        .limit(1)
+        .single();
+      if (data) {
+        setSettingsId(data.id);
+        setDistance(Number(data.max_distance_km));
+        setBuffer(Number(data.time_buffer_minutes));
+      }
+      setLoading(false);
+    };
+    const fetchRole = async () => {
+      const user = supabase.auth.getUser ? (await supabase.auth.getUser()).data.user : null;
+      if (user) {
+        // You may need to adjust this query to match your users table/role logic
+        const { data } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+        setIsAdmin(data?.role === "admin");
+      }
+    };
+    fetchSettings();
+    fetchRole();
+  }, []);
+
+  // Update settings in DB
+  const handleUpdateSettings = async () => {
+    setLoading(true);
+    if (!isAdmin) {
+      setSnackbar({ open: true, message: "Only admins can update settings.", severity: "error" });
+      setLoading(false);
+      return;
+    }
+    if (!settingsId) {
+      setSnackbar({ open: true, message: "Settings row not found. Please contact admin.", severity: "error" });
+      setLoading(false);
+      return;
+    }
+    const { error } = await supabase
+      .from("fraud_detection_settings")
+      .update({ max_distance_km: distance, time_buffer_minutes: buffer, updated_at: new Date().toISOString() })
+      .eq("id", settingsId);
+    setLoading(false);
+    if (!error) {
+      setSnackbar({ open: true, message: "Settings updated successfully!", severity: "success" });
+    } else {
+      setSnackbar({ open: true, message: "Failed to update settings: " + error.message, severity: "error" });
+    }
+  };
 
   return (
     <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
@@ -59,15 +126,13 @@ export default function FraudDetection() {
                   <TextField
                     id="distance"
                     type="number"
-                    value={distance}
+                    value={distance === null ? "" : distance}
                     onChange={(e) => setDistance(e.target.value)}
                     inputProps={{ min: 0.1, max: 5.0, step: 0.1 }}
                     size="small"
                     sx={{ flex: 1, "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }}
+                    disabled={distance === null}
                   />
-                  <Button variant="contained" sx={{ bgcolor: "#0f172a", color: "#fff", "&:hover": { bgcolor: "#0b1320" } }}>
-                    Apply
-                  </Button>
                 </Box>
               </Box>
             </CardContent>
@@ -84,15 +149,38 @@ export default function FraudDetection() {
                   Late Buffer (minutes)
                 </InputLabel>
                 <Box display="flex" gap={1}>
-                  <TextField id="buffer" type="number" defaultValue={5} size="small" fullWidth sx={{ "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }} />
-                  <Button variant="contained" sx={{ bgcolor: "#0f172a", color: "#fff", "&:hover": { bgcolor: "#0b1320" } }}>
-                    Update
-                  </Button>
+                  <TextField
+                    id="buffer"
+                    type="number"
+                    value={buffer === null ? "" : buffer}
+                    onChange={(e) => setBuffer(e.target.value)}
+                    inputProps={{ min: 1, max: 30, step: 1 }}
+                    size="small"
+                    sx={{ flex: 1, "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }}
+                    disabled={buffer === null}
+                  />
                 </Box>
               </Box>
             </CardContent>
           </Card>
         </div>
+
+        <Box mt={2} mb={2}>
+          <Button
+            variant="contained"
+            color="primary"
+            disabled={!isAdmin || loading}
+            onClick={handleUpdateSettings}
+          >
+            Update Settings
+          </Button>
+        </Box>
+
+        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+          <MuiAlert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
+            {snackbar.message}
+          </MuiAlert>
+        </Snackbar>
 
         <Card sx={{ mt: 4, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", p: 2 }}>
@@ -133,3 +221,4 @@ export default function FraudDetection() {
     </div>
   );
 }
+

@@ -66,24 +66,30 @@ export default function Overview() {
           return;
         }
 
-        // Fetch attendance issues (fraud cases)
-        const { data: issuesData, error: issuesError } = await supabase
-          .from("attendance_issues")
-          .select(`
-            id,
-            issue_type,
-            enrollment_lecture!inner(
-              id,
-              course_lecture!inner(lecturer_id)
-            )
-          `)
-          .eq("enrollment_lecture.course_lecture.lecturer_id", user.id);
+        // Fetch fraud cases from fraud_detection_alerts table for sessions belonging to this lecturer's classes
+        // First, get all session IDs for this lecturer's classes
+        const { data: sessions, error: sessionsError } = await supabase
+          .from("attendance_session")
+          .select("id, course_lecture_id")
+          .in("course_lecture_id", classIds);
 
-        if (issuesError) {
-          console.error("Error fetching attendance issues:", issuesError);
+        if (sessionsError) {
+          console.error("Error fetching sessions for fraud alerts:", sessionsError);
         } else {
-          const fraudCases = issuesData?.length || 0;
-          console.log("Found fraud cases:", fraudCases);
+          const sessionIds = (sessions || []).map(s => s.id);
+          let fraudCases = 0;
+          if (sessionIds.length > 0) {
+            const { data: fraudAlerts, error: fraudError } = await supabase
+              .from("fraud_detection_alerts")
+              .select("id, session_id")
+              .in("session_id", sessionIds);
+            if (fraudError) {
+              console.error("Error fetching fraud alerts:", fraudError);
+            } else {
+              fraudCases = fraudAlerts?.length || 0;
+            }
+          }
+          console.log("Found fraud cases (fraud_detection_alerts):", fraudCases);
           setLeaveRequests(prev => ({
             ...prev,
             fraudCases: fraudCases
@@ -110,15 +116,15 @@ export default function Overview() {
 
         // Fetch pending absence documents by first finding sessions for this lecturer's classes,
         // then counting mc_submissions linked to those sessions with status pending_review
-        const { data: sessions, error: sessionsError } = await supabase
+        const { data: absenceSessions, error: absenceSessionsError } = await supabase
           .from("attendance_session")
           .select("id, course_lecture_id")
           .in("course_lecture_id", classIds);
 
-        if (sessionsError) {
-          console.error("Error fetching sessions:", sessionsError);
+        if (absenceSessionsError) {
+          console.error("Error fetching sessions:", absenceSessionsError);
         } else {
-          const sessionIds = (sessions || []).map(s => s.id);
+          const sessionIds = (absenceSessions || []).map(s => s.id);
           let pendingDocuments = 0;
 
           if (sessionIds.length > 0) {

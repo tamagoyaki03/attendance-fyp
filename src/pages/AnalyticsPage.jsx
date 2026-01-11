@@ -318,7 +318,7 @@ export default function AnalyticsPage() {
                 <FraudDetectionChart timeRange={timeRange} />
               </CardContent>
             </Card>
-
+            {/*
             <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
               <CardHeader title="Fraud by Method" />
               <CardContent sx={{ height: 300, pt: 2 }}>
@@ -344,6 +344,7 @@ export default function AnalyticsPage() {
                 </Box>
               </CardContent>
             </Card>
+            */}
           </div>
         </Box>
       </main>
