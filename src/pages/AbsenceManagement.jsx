@@ -36,8 +36,7 @@ According to university policy, all absences must be documented with a valid Med
 
 If you have any questions or need assistance, please contact the Student Affairs Office.
 
-Thank you,
-[University Name] Attendance Management System`;
+Thank you`;
 
 export default function AbsenceManagement() {
   const [activeTab, setActiveTab] = useState(0);
@@ -347,6 +346,27 @@ export default function AbsenceManagement() {
       return;
     }
 
+    // Validate template is not empty
+    if (!emailSettings.emailTemplate || emailSettings.emailTemplate.trim() === "") {
+      setSnackbar({ open: true, message: "Email template cannot be empty.", severity: "error" });
+      return;
+    }
+
+    // Validate template has required placeholders
+    const requiredPlaceholders = ["[Student Name]", "[Course Code]", "[Course Name]", "[Absence Date]", "[Submission Link]"];
+    const missingPlaceholders = requiredPlaceholders.filter(
+      placeholder => !emailSettings.emailTemplate.includes(placeholder)
+    );
+
+    if (missingPlaceholders.length > 0) {
+      setSnackbar({ 
+        open: true, 
+        message: `Email template must include: ${missingPlaceholders.join(", ")}`, 
+        severity: "error" 
+      });
+      return;
+    }
+
     setSettingsLoading(true);
     try {
       // Check if settings exist for this lecturer
@@ -549,7 +569,7 @@ export default function AbsenceManagement() {
               <Box>
                 <Typography variant="body2" gutterBottom>Email Template</Typography>
                 <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                  Use placeholders: [Student Name], [Course Code], [Course Name], [Absence Date], [Submission Link], [University Name]
+                  Use placeholders: [Student Name], [Course Code], [Course Name], [Absence Date], [Submission Link]
                 </Typography>
                 <textarea
                   rows={12}

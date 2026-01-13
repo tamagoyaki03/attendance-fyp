@@ -29,6 +29,34 @@ export default function FraudDetection() {
   const [settingsId, setSettingsId] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
 
+  // Validation handler for distance (max 1km)
+  const handleDistanceChange = (e) => {
+    const value = parseFloat(e.target.value);
+    if (value > 1.0) {
+      setSnackbar({ open: true, message: "Maximum distance is 1km", severity: "warning" });
+      setDistance(1.0);
+    } else if (value < 0.1 && e.target.value !== "") {
+      setSnackbar({ open: true, message: "Minimum distance is 0.1km", severity: "warning" });
+      setDistance(0.1);
+    } else {
+      setDistance(e.target.value);
+    }
+  };
+
+  // Validation handler for buffer (max 30 minutes)
+  const handleBufferChange = (e) => {
+    const value = parseInt(e.target.value);
+    if (value > 30) {
+      setSnackbar({ open: true, message: "Maximum buffer is 30 minutes", severity: "warning" });
+      setBuffer(30);
+    } else if (value < 1 && e.target.value !== "") {
+      setSnackbar({ open: true, message: "Minimum buffer is 1 minute", severity: "warning" });
+      setBuffer(1);
+    } else {
+      setBuffer(e.target.value);
+    }
+  };
+
   // Fetch current settings and user role on mount
   useEffect(() => {
     const fetchSettings = async () => {
@@ -36,7 +64,7 @@ export default function FraudDetection() {
       setDistance(null);
       setBuffer(null);
       // Fetch settings (single row)
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("fraud_detection_settings")
         .select("id, max_distance_km, time_buffer_minutes")
         .limit(1)
@@ -120,15 +148,15 @@ export default function FraudDetection() {
             <CardContent>
               <Box mb={2}>
                 <InputLabel htmlFor="distance" sx={{ mb: 1, display: "block", color: "text.secondary" }}>
-                  Max Distance (km)
+                  Max Distance (km) - Max: 1km
                 </InputLabel>
                 <Box display="flex" gap={1}>
                   <TextField
                     id="distance"
                     type="number"
                     value={distance === null ? "" : distance}
-                    onChange={(e) => setDistance(e.target.value)}
-                    inputProps={{ min: 0.1, max: 5.0, step: 0.1 }}
+                    onChange={handleDistanceChange}
+                    inputProps={{ min: 0.1, max: 1.0, step: 0.1 }}
                     size="small"
                     sx={{ flex: 1, "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }}
                     disabled={distance === null}
@@ -146,14 +174,14 @@ export default function FraudDetection() {
             <CardContent>
               <Box mb={2}>
                 <InputLabel htmlFor="buffer" sx={{ mb: 1, display: "block", color: "text.secondary" }}>
-                  Late Buffer (minutes)
+                  Late Buffer (minutes) - Max: 30 minutes
                 </InputLabel>
                 <Box display="flex" gap={1}>
                   <TextField
                     id="buffer"
                     type="number"
                     value={buffer === null ? "" : buffer}
-                    onChange={(e) => setBuffer(e.target.value)}
+                    onChange={handleBufferChange}
                     inputProps={{ min: 1, max: 30, step: 1 }}
                     size="small"
                     sx={{ flex: 1, "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }}

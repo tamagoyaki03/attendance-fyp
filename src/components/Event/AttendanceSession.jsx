@@ -196,6 +196,7 @@ useEffect(() => {
     const interval = setInterval(checkSessionExpired, 10000);
     return () => clearInterval(interval);
   }
+// eslint-disable-next-line react-hooks/exhaustive-deps
 }, [open, sessionId]);
 
   // Generate a QR code when the dialog opens

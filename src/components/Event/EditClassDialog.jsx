@@ -125,6 +125,7 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       // Fetch enrolled students for this class
       fetchEnrolledStudents();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classData, open]);
 
   const fetchEnrolledStudents = async () => {
@@ -269,16 +270,89 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
     }
   }, [open]);
 
+  // Check for lecturer scheduling conflicts
+  const checkLecturerConflict = async () => {
+    if (!formData.lecturer || !formData.day || !formData.startTime || !formData.endTime) {
+      return null;
+    }
+
+    const dayNumber = {
+      "Monday": 1,
+      "Tuesday": 2,
+      "Wednesday": 3,
+      "Thursday": 4,
+      "Friday": 5,
+    }[formData.day];
+
+    // Check both lecture and tutorial tables for conflicts
+    const [lectureCheck, tutorialCheck] = await Promise.all([
+      supabase
+        .from('course_lecture')
+        .select('id, course_code, course_title, lecture_start_time, lecture_end_time')
+        .eq('lecturer_id', formData.lecturer)
+        .eq('day_of_week', dayNumber)
+        .neq('id', classData.id), // Exclude current class
+      supabase
+        .from('course_tutorial')
+        .select('id, course_code, course_title, tutorial_start_time, tutorial_end_time')
+        .eq('lecturer_id', formData.lecturer)
+        .eq('day_of_week', dayNumber)
+        .neq('id', classData.id) // Exclude current class
+    ]);
+
+    const allClasses = [
+      ...(lectureCheck.data || []).map(c => ({
+        code: c.course_code,
+        title: c.course_title,
+        start: c.lecture_start_time,
+        end: c.lecture_end_time,
+        type: 'Lecture'
+      })),
+      ...(tutorialCheck.data || []).map(c => ({
+        code: c.course_code,
+        title: c.course_title,
+        start: c.tutorial_start_time,
+        end: c.tutorial_end_time,
+        type: 'Tutorial'
+      }))
+    ];
+
+    // Check for time overlap
+    const newStart = formData.startTime;
+    const newEnd = formData.endTime;
+
+    for (const existingClass of allClasses) {
+      // Check if times overlap
+      if (
+        (newStart >= existingClass.start && newStart < existingClass.end) ||
+        (newEnd > existingClass.start && newEnd <= existingClass.end) ||
+        (newStart <= existingClass.start && newEnd >= existingClass.end)
+      ) {
+        return existingClass;
+      }
+    }
+
+    return null;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+
+    // Check for lecturer scheduling conflicts
+    const conflict = await checkLecturerConflict();
+    if (conflict) {
+      alert(`Scheduling conflict! This lecturer is already assigned to ${conflict.type}: ${conflict.code} - ${conflict.title} on ${formData.day} from ${conflict.start} to ${conflict.end}.`);
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const isLecture = formData.type === "Lecture";
       const courseTable = isLecture ? "course_lecture" : "course_tutorial";
       const enrollmentTable = isLecture ? "enrollment_lecture" : "enrollment_tutorial";
       const courseIdField = isLecture ? "course_id" : "tutorial_id";
-      const enrollmentIdField = isLecture ? "id" : "id";
+
 
       const dayNumber = {
         "Monday": 1,

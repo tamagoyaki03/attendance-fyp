@@ -49,6 +49,27 @@ export default function LoginPage() {
     setIsLoading(true);
     setMessage("");
 
+    // Validate email field
+    if (!email || email.trim() === "") {
+      setMessage("Email address is required");
+      setIsLoading(false);
+      return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setMessage("Invalid email address");
+      setIsLoading(false);
+      return;
+    }
+
+    if (!password || password.trim() === "") {
+      setMessage("Password is required");
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -71,6 +92,11 @@ export default function LoginPage() {
 
       if (userError || !userProfile) {
         setMessage("Login successful, but failed to fetch user profile.");
+      } else if (userProfile.role !== "lecturer" && userProfile.role !== "admin") {
+        // Only allow lecturers and admins to log in
+        setMessage("Access denied. Only lecturers and admins can access this system.");
+        // Sign out the user
+        await supabase.auth.signOut();
       } else {
         const role = userProfile.role === "admin" ? "admin" : "lecturer";
         const storage = rememberMe ? localStorage : sessionStorage;

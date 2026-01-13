@@ -333,14 +333,14 @@ export default function MCSubmissions({ onChanged }) {
       setSnackbar({ open: true, message: "MC submission approved successfully", severity: "success" });
 
       // Notify parent to refresh Absence tab data and attendance management
-      try { onChanged && onChanged(); } catch (e) {}
+      try { onChanged && onChanged(); } catch {} // eslint-disable-line no-empty
       // Also trigger a window event for attendance management refresh
       try {
         window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { sessionId, studentId } }));
-      } catch (e) {}
-    } catch (e) {
-      console.error('Approve failed:', e);
-      setSnackbar({ open: true, message: `Failed to approve: ${e.message || 'Unknown error'}`, severity: "error" });
+      } catch {} // eslint-disable-line no-empty
+    } catch (error) {
+      console.error('Approve failed:', error);
+      setSnackbar({ open: true, message: `Failed to approve: ${error.message || 'Unknown error'}`, severity: "error" });
     } finally {
       setDialogOpen(false);
     }
@@ -434,10 +434,10 @@ export default function MCSubmissions({ onChanged }) {
       }
 
       // Notify parent and broadcast event
-      try { onChanged && onChanged(); } catch (_) {}
+      try { onChanged && onChanged(); } catch {} // eslint-disable-line no-empty
       try {
         window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { sessionId: submission.sessionId, studentId } }));
-      } catch (_) {}
+      } catch {} // eslint-disable-line no-empty
 
     } catch (e) {
       console.error('Reject failed:', e);
@@ -481,7 +481,8 @@ export default function MCSubmissions({ onChanged }) {
       if (!error && data) {
         matric = data.matric_number || null;
       }
-    } catch (_) {}
+    // eslint-disable-next-line no-empty
+    } catch {}
 
     setSelectedSubmission({
       ...submission,

@@ -33,7 +33,15 @@ const generateTimeOptions = () => {
 };
 const timeOptions = generateTimeOptions();
 
-export default function ScheduleInput({ formData = {}, setFormData }) {
+export default function ScheduleInput({ 
+  formData = {}, 
+  setFormData, 
+  validationErrors = {},
+  touched = {},
+  setTouched = () => {},
+  setValidationErrors = () => {},
+  validateField = () => ""
+}) {
   const handleField = (patch) => {
     // keep both camelCase and snake_case keys in sync to support different callers
     const normalized = {};
@@ -83,8 +91,19 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
           labelId="day-select-label"
           value={formData.day || ""}
           label="Day of Week"
-          onChange={(e) => handleField({ day: e.target.value })}
+          onChange={(e) => {
+            handleField({ day: e.target.value });
+            setTouched((prev) => ({ ...prev, day: true }));
+            const error = validateField("day", e.target.value);
+            setValidationErrors((prev) => {
+              const newErrors = { ...prev };
+              if (error) newErrors.day = error;
+              else delete newErrors.day;
+              return newErrors;
+            });
+          }}
           size="small"
+          error={touched.day && !!validationErrors.day}
           sx={{
             backgroundColor: "#ffffff",
             borderRadius: 1,
@@ -97,6 +116,11 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
             </MenuItem>
           ))}
         </Select>
+        {touched.day && validationErrors.day && (
+          <Box sx={{ color: "#d32f2f", fontSize: "0.75rem", mt: 0.5, ml: 1.75 }}>
+            {validationErrors.day}
+          </Box>
+        )}
       </FormControl>
 
       <Box display="flex" gap={2} mb={2}>
@@ -106,8 +130,19 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
             labelId="start-time-label"
             value={formData.startTime || formData.start_time || ""}
             label="Start Time"
-            onChange={(e) => handleField({ startTime: e.target.value })}
+            onChange={(e) => {
+              handleField({ startTime: e.target.value });
+              setTouched((prev) => ({ ...prev, start_time: true }));
+              const error = validateField("start_time", e.target.value);
+              setValidationErrors((prev) => {
+                const newErrors = { ...prev };
+                if (error) newErrors.start_time = error;
+                else delete newErrors.start_time;
+                return newErrors;
+              });
+            }}
             size="small"
+            error={touched.start_time && !!validationErrors.start_time}
             sx={{
               backgroundColor: "#ffffff",
               borderRadius: 1,
@@ -120,6 +155,11 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
               </MenuItem>
             ))}
           </Select>
+          {touched.start_time && validationErrors.start_time && (
+            <Box sx={{ color: "#d32f2f", fontSize: "0.75rem", mt: 0.5, ml: 1.75 }}>
+              {validationErrors.start_time}
+            </Box>
+          )}
         </FormControl>
 
         <FormControl fullWidth>
@@ -128,8 +168,25 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
             labelId="end-time-label"
             value={formData.endTime || formData.end_time || ""}
             label="End Time"
-            onChange={(e) => handleField({ endTime: e.target.value })}
+            onChange={(e) => {
+              handleField({ endTime: e.target.value });
+              setTouched((prev) => ({ ...prev, end_time: true }));
+              const error = validateField("end_time", e.target.value);
+              setValidationErrors((prev) => {
+                const newErrors = { ...prev };
+                if (error) newErrors.end_time = error;
+                else delete newErrors.end_time;
+                // Re-validate start_time to check if end > start
+                if (formData.start_time) {
+                  const startError = validateField("start_time", formData.start_time);
+                  if (startError) newErrors.start_time = startError;
+                  else delete newErrors.start_time;
+                }
+                return newErrors;
+              });
+            }}
             size="small"
+            error={touched.end_time && !!validationErrors.end_time}
             sx={{
               backgroundColor: "#ffffff",
               borderRadius: 1,
@@ -137,11 +194,14 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
             }}
           >
             {timeOptions.map((t) => (
-              <MenuItem key={t} value={t}>
-                {t}
-              </MenuItem>
+              <MenuItem key={t} value={t}>{t}</MenuItem>
             ))}
           </Select>
+          {touched.end_time && validationErrors.end_time && (
+            <Box sx={{ color: "#d32f2f", fontSize: "0.75rem", mt: 0.5, ml: 1.75 }}>
+              {validationErrors.end_time}
+            </Box>
+          )}
         </FormControl>
       </Box>
 
@@ -150,10 +210,22 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
           <DatePicker
             label="Start Date"
             value={formData.startDate || formData.start_date || null}
-            onChange={(newVal) => handleField({ startDate: newVal })}
+            onChange={(newVal) => {
+              handleField({ startDate: newVal });
+              setTouched((prev) => ({ ...prev, start_date: true }));
+              const error = validateField("start_date", newVal);
+              setValidationErrors((prev) => {
+                const newErrors = { ...prev };
+                if (error) newErrors.start_date = error;
+                else delete newErrors.start_date;
+                return newErrors;
+              });
+            }}
             slotProps={{
               textField: {
                 size: "small",
+                error: touched.start_date && !!validationErrors.start_date,
+                helperText: touched.start_date && validationErrors.start_date,
                 sx: {
                   backgroundColor: "#ffffff",
                   "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
@@ -164,11 +236,22 @@ export default function ScheduleInput({ formData = {}, setFormData }) {
           <DatePicker
             label="End Date"
             value={formData.endDate || formData.end_date || null}
-            onChange={(newVal) => handleField({ endDate: newVal })}
-            minDate={formData.startDate || formData.start_date || null}
+            onChange={(newVal) => {
+              handleField({ endDate: newVal });
+              setTouched((prev) => ({ ...prev, end_date: true }));
+              const error = validateField("end_date", newVal);
+              setValidationErrors((prev) => {
+                const newErrors = { ...prev };
+                if (error) newErrors.end_date = error;
+                else delete newErrors.end_date;
+                return newErrors;
+              });
+            }}
             slotProps={{
               textField: {
                 size: "small",
+                error: touched.end_date && !!validationErrors.end_date,
+                helperText: touched.end_date && validationErrors.end_date,
                 sx: {
                   backgroundColor: "#ffffff",
                   "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },

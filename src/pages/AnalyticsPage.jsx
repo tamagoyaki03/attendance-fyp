@@ -15,7 +15,6 @@ import {
   Tooltip,
   Divider,
   LinearProgress,
-  useTheme,
   TextField,
   InputAdornment,
   CircularProgress,
@@ -36,19 +35,16 @@ import {
   WarningAmber,
 } from "@mui/icons-material";
 import { Search as SearchIcon } from "@mui/icons-material";
-import { format, subDays, subMonths, startOfYear } from "date-fns";
+import { format, subDays, startOfYear } from "date-fns";
 import Sidebar from "../components/Sidebar";
 import AttendanceTrends from "../components/Event/AttendanceTrends";
 import TopAbsenceReasons from "../components/Event/TopAbsenceReason";
 import FraudDetectionChart from "../components/Event/FraudDetectionChart";
-import supabase from "../config/supabaseClient";
 import { calculateAttendanceMetrics } from "../utils/analyticsUtils";
 
 export default function AnalyticsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState("30days");
-  const [tab, setTab] = useState(0);
-  const theme = useTheme();
   const [kpiData, setKpiData] = useState({
     avgAttendanceRate: 0,
     chronicAbsenteeism: 0,
@@ -150,24 +146,23 @@ export default function AnalyticsPage() {
     }
   };
 
-  const [fraudItems, setFraudItems] = useState([]);
-
   useEffect(() => {
     fetchAnalyticsData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, timeRange]);
 
   useEffect(() => {
     // Fetch fraud data by method
     // TODO: Replace with actual fraud detection table when ready
     // For now, using placeholder data
-    const mockFraudData = [
-      { label: "Location Spoofing", value: 42, color: "#ef4444" },
-      { label: "QR Code Sharing", value: 28, color: "#f59e0b" },
-      { label: "Proxy Attendance", value: 15, color: "#3b82f6" },
-      { label: "Device Manipulation", value: 10, color: "#8b5cf6" },
-      { label: "Other", value: 5, color: "#6b7280" },
-    ];
-    setFraudItems(mockFraudData);
+    // const mockFraudData = [
+    //   { label: "Location Spoofing", value: 42, color: "#ef4444" },
+    //   { label: "QR Code Sharing", value: 28, color: "#f59e0b" },
+    //   { label: "Proxy Attendance", value: 15, color: "#3b82f6" },
+    //   { label: "Device Manipulation", value: 10, color: "#8b5cf6" },
+    //   { label: "Other", value: 5, color: "#6b7280" },
+    // ];
+    // setFraudItems(mockFraudData);
   }, [timeRange]);
 
   return (

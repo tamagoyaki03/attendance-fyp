@@ -1,8 +1,8 @@
 import React from 'react';
 import { Routes, Route } from 'react-router-dom';
-import { useAuth } from './SupabaseProvider'
 import { Auth } from '@supabase/auth-ui-react'
 import { ThemeSupa } from '@supabase/auth-ui-shared'
+import ProtectedRoute from './components/ProtectedRoute';
 
 // Import page components
 import ManageClassesPage from './pages/ManageClasses';
@@ -39,15 +39,15 @@ const AppRoutes = () => {
             <Route path="/" element={<Login />} />
             <Route path="/signup" element={<SignUp />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/dashboard" element={<Overview />} />
-            <Route path="/manage-classes" element={<ManageClassesPage />} />
-            <Route path="/fraud-detection" element={<FraudDetection />} />
-            <Route path="/attendance-management" element={<AttendanceManagement />} />
-            <Route path="/absence-management" element={<AbsenceManagement />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/student-absence/submit" element={<SubmitAbsenceDocumentPage />} />
+            <Route path="/profile" element={<ProtectedRoute element={<ProfilePage />} />} />
+            <Route path="/dashboard" element={<ProtectedRoute element={<Overview />} />} />
+            <Route path="/manage-classes" element={<ProtectedRoute element={<ManageClassesPage />} />} />
+            <Route path="/fraud-detection" element={<ProtectedRoute element={<FraudDetection />} />} />
+            <Route path="/attendance-management" element={<ProtectedRoute element={<AttendanceManagement />} />} />
+            <Route path="/absence-management" element={<ProtectedRoute element={<AbsenceManagement />} />} />
+            <Route path="/analytics" element={<ProtectedRoute element={<AnalyticsPage />} />} />
+            <Route path="/reports" element={<ProtectedRoute element={<ReportsPage />} />} />
+            <Route path="/student-absence/submit" element={<ProtectedRoute element={<SubmitAbsenceDocumentPage />} />} />
           </Routes>
   );
 };

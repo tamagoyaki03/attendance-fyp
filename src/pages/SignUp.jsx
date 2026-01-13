@@ -40,7 +40,9 @@ export default function SignupPage() {
   const [message, setMessage] = useState("");
   const [showOtpInput, setShowOtpInput] = useState(false);
   const [otp, setOtp] = useState("");
+  // eslint-disable-next-line no-unused-vars
   const [userId, setUserId] = useState(null);
+
   const navigate = useNavigate();
 
   const calculatePasswordStrength = (password) => {
@@ -91,6 +93,7 @@ export default function SignupPage() {
     setIsLoading(true);
     
     try {
+      // Step 1: Create auth user without custom data
       const { data, error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -103,28 +106,61 @@ export default function SignupPage() {
       });
       
       console.log("Supabase response:", { data, error });
-      setIsLoading(false);
       
       if (error) {
         console.error("Signup error:", error);
+        setIsLoading(false);
         setMessage(error.message);
-      } else if (data?.user) {
-        console.log("User created:", data.user);
-        setUserId(data.user.id);
-        
-        // Check if email confirmation is required
-        if (data.user.identities && data.user.identities.length === 0) {
-          setMessage("This email is already registered. Please log in instead.");
-        } else if (data.user.confirmed_at) {
-          setMessage("Account created successfully! Redirecting to login...");
-          setTimeout(() => navigate("/"), 1800);
-        } else {
-          setShowOtpInput(true);
-          setMessage("A verification code has been sent to your email. Please enter it below.");
-        }
-      } else {
-        console.warn("No error but no user data:", data);
+        return;
+      }
+
+      if (!data?.user) {
+        console.warn("No user data returned from signup");
+        setIsLoading(false);
         setMessage("Something went wrong. Please try again.");
+        return;
+      }
+
+      const userId = data.user.id;
+      console.log("User created:", data.user);
+      setUserId(userId);
+
+      // Step 2: Update user profile data (insert or update if already exists from trigger)
+      try {
+        const { error: upsertError } = await supabase
+          .from("users")
+          .upsert([
+            {
+              id: userId,
+              email: formData.email,
+              name: formData.name,
+              role: formData.role,
+            },
+          ]);
+
+        if (upsertError) {
+          console.error("Error updating user data:", upsertError);
+          // Don't fail signup just because user data update failed
+          // User can still proceed to login and complete profile later
+        } else {
+          console.log("User data updated successfully");
+        }
+      } catch (upsertErr) {
+        console.error("Unexpected error updating user data:", upsertErr);
+        // Silently continue - auth user was created even if custom data update failed
+      }
+
+      setIsLoading(false);
+
+      // Check if email confirmation is required
+      if (data.user.identities && data.user.identities.length === 0) {
+        setMessage("This email is already registered. Please log in instead.");
+      } else if (data.user.confirmed_at) {
+        setMessage("Account created successfully! Redirecting to login...");
+        setTimeout(() => navigate("/"), 1800);
+      } else {
+        setShowOtpInput(true);
+        setMessage("A verification code has been sent to your email. Please enter it below.");
       }
     } catch (err) {
       console.error("Unexpected error:", err);

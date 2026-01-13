@@ -62,7 +62,7 @@ const LocationInput = ({ formData, setFormData }) => {
             lat: latitude,
             long: longitude,
           }));
-        } catch (error) {
+        } catch {
           setFormData((prev) => ({
             ...prev,
             location: `Lat: ${latitude.toFixed(6)}, Long: ${longitude.toFixed(6)}`,
@@ -71,7 +71,7 @@ const LocationInput = ({ formData, setFormData }) => {
           }));
         }
       },
-      (error) => {
+      () => {
         setFormData((prev) => ({
           ...prev,
           location: "Location access denied",

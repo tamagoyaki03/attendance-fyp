@@ -36,7 +36,7 @@ export default function LeaveRequestList({ onChanged }) {
   const [requests, setRequests] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter] = useState("all");
   const [rejectionReason, setRejectionReason] = useState("");
   const [tabValue, setTabValue] = useState(0);
   const [snackbar, setSnackbar] = useState({ open: false, message: "" });
@@ -241,7 +241,8 @@ export default function LeaveRequestList({ onChanged }) {
       );
       setSnackbar({ open: true, message: "Leave request approved." });
       setIsDetailsOpen(false);
-      try { onChanged && onChanged(); } catch (_) {}
+      // eslint-disable-next-line no-empty
+      try { onChanged && onChanged(); } catch {}
     }
   };
 
@@ -269,7 +270,8 @@ export default function LeaveRequestList({ onChanged }) {
       );
       setSnackbar({ open: true, message: "Leave request rejected." });
       setIsDetailsOpen(false);
-      try { onChanged && onChanged(); } catch (_) {}
+      // eslint-disable-next-line no-empty
+      try { onChanged && onChanged(); } catch {}
     }
   };
 

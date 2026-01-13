@@ -17,11 +17,13 @@ import FlagIcon from "@mui/icons-material/Flag";
 import supabase from "../config/supabaseClient";
 import * as XLSX from 'xlsx';
 
-export default function StudentDetailsCard({ student, open, onClose, onMarkPresent, classData }) {
+export default function StudentDetailsCard({ student, open, onClose, classData }) {
   const [activeTab, setActiveTab] = useState(0);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+
 
   // Fetch attendance history when component opens
   useEffect(() => {

@@ -11,6 +11,7 @@ export default function AttendanceIssues({ selectedClass }) {
   const [issues, setIssues] = useState([]);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [isDialogOpen, setDialogOpen] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [statusFilter, setStatusFilter] = useState("all");
   const [resolutionNotes, setResolutionNotes] = useState("");
   const [tab, setTab] = useState(0);
@@ -91,6 +92,7 @@ export default function AttendanceIssues({ selectedClass }) {
     };
 
     fetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClass?.id, selectedClass?.type]);
 
   const filteredIssues = issues.filter((issue) => 

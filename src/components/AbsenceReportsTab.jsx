@@ -60,7 +60,11 @@ export default function AbsenceReportsTab() {
           ...(tutorialRes.data || []).map((c) => ({ ...c, classType: "Tutorial" })),
         ];
 
-        // Fetch all sessions for these courses to then get MC submissions
+        // Format date range for filtering
+        const fromDateStr = format(fromDate, "yyyy-MM-dd");
+        const toDateStr = format(toDate, "yyyy-MM-dd");
+
+        // Fetch all sessions for these courses within the date range
         let sessionIds = [];
         if (courseItems.length) {
           const lectureIds = (lectureRes.data || []).map((c) => c.id);
@@ -69,12 +73,22 @@ export default function AbsenceReportsTab() {
           const queries = [];
           if (lectureIds.length) {
             queries.push(
-              supabase.from("attendance_session").select("id").in("course_lecture_id", lectureIds)
+              supabase
+                .from("attendance_session")
+                .select("id")
+                .in("course_lecture_id", lectureIds)
+                .gte("date", fromDateStr)
+                .lte("date", toDateStr)
             );
           }
           if (tutorialIds.length) {
             queries.push(
-              supabase.from("attendance_session").select("id").in("course_tutorial_id", tutorialIds)
+              supabase
+                .from("attendance_session")
+                .select("id")
+                .in("course_tutorial_id", tutorialIds)
+                .gte("date", fromDateStr)
+                .lte("date", toDateStr)
             );
           }
 
@@ -150,7 +164,7 @@ export default function AbsenceReportsTab() {
     };
 
     fetchData();
-  }, [user?.id]);
+  }, [user?.id, user?.role, fromDate, toDate]);
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>

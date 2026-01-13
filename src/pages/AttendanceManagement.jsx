@@ -53,6 +53,7 @@ export default function AttendanceManagementPage() {
   const searchParams = new URLSearchParams(location.search);
   const classId = searchParams.get("classId");
   const [classes, setClasses] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const [fetchError, setFetchError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClass, setSelectedClass] = useState(null);
@@ -66,22 +67,22 @@ export default function AttendanceManagementPage() {
   const [sessionType, setSessionType] = useState(null)
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "info" });
   const [addresses, setAddresses] = useState({});
-  const [now, setNow] = useState(Date.now());
   const [classAttendance, setClassAttendance] = useState(null);
   const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
   const [userRole, setUserRole] = useState("");
-  const [userName, setUserName] = useState("");
   const [enrolledStudents, setEnrolledStudents] = useState([]);
   const [currentSessionPassword, setCurrentSessionPassword] = useState(null);
   const [showStudentDetails, setShowStudentDetails] = useState(false);
   const [chooseModeDialogOpen, setChooseModeDialogOpen] = useState(false);
   const [onlineDialogOpen, setOnlineDialogOpen] = useState(false);
-  const [attendanceMode, setAttendanceMode] = useState(null); 
+  // eslint-disable-next-line no-unused-vars
+  const [attendanceMode, setAttendanceMode] = useState(null);
   const [requireQrToEnd, setRequireQrToEnd] = useState(false);
   const [todayAttendanceStatus, setTodayAttendanceStatus] = useState(null);
   const [todayAttendanceData, setTodayAttendanceData] = useState({ present: [], absent: [] });
   const [canStartAttendance, setCanStartAttendance] = useState(false);
   const [timeValidationMessage, setTimeValidationMessage] = useState('');
+  const [hasWeeklySession, setHasWeeklySession] = useState(false);
 
   useEffect(() => {
     const handler = () => {
@@ -92,6 +93,7 @@ export default function AttendanceManagementPage() {
     };
     window.addEventListener('attendance-updated', handler);
     return () => window.removeEventListener('attendance-updated', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClass, currentAttendanceId]);
   // Send absence emails after lecture_end_time is reached
   useEffect(() => {
@@ -140,7 +142,7 @@ export default function AttendanceManagementPage() {
       severity: "success",
     });
     // Do NOT open QR dialog for online mode
-  } catch (error) {
+  } catch {
     setSnackbar({
       open: true,
       message: "Failed to start online session.",
@@ -153,21 +155,20 @@ export default function AttendanceManagementPage() {
 
   useEffect(() => {
     if (!sessionActive) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
+    const interval = setInterval(() => setSessionStartTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, [sessionActive]);
 
   useEffect(() => {
     const fetchUserInfo = async () => {
       if (!user.id) return;
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("users")
         .select("name, role")
         .eq("id", user.id)
         .single();
-      if (!error && data) {
+      if (data) {
         setUserRole(data.role);
-        setUserName(data.name);
       }
     };
     fetchUserInfo();
@@ -182,12 +183,14 @@ export default function AttendanceManagementPage() {
     setCanStartAttendance(false);
     setTimeValidationMessage("Loading class schedule...");
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [selectedClass?.id, selectedClass?.startTime, selectedClass?.endTime, todayAttendanceStatus]);
 
   useEffect(() => {
     if (selectedClass) {
       checkTodayAttendance();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClass]);
 
  // Function to check if attendance was already taken today
@@ -309,6 +312,7 @@ export default function AttendanceManagementPage() {
 
     if (!weekSession) {
       // No session found for this week, show all students as not marked
+      setHasWeeklySession(false);
       const studentsWithStatus = enrollments.map(enrollment => ({
         ...enrollment.users,
         student_id: enrollment.student_id,
@@ -322,6 +326,8 @@ export default function AttendanceManagementPage() {
       });
       return;
     }
+
+    setHasWeeklySession(true);
 
     // Get attendance records for this week's session, including flag_reason
     const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
@@ -371,7 +377,7 @@ export default function AttendanceManagementPage() {
           };
         }
       }
-    } catch (e) {
+    } catch {
       classLocation = null;
     }
 
@@ -630,10 +636,7 @@ const renderAttendanceList = () => {
     ...(todayAttendanceData.excused || []),
     ...(todayAttendanceData.flagged || [])
   ];
-  const flaggedStudents = (todayAttendanceData.flagged || []);
   const excusedStudents = todayAttendanceData.excused || [];
-  const presentList = (todayAttendanceData.present || []).filter(s => s.status === 'present');
-  const absentList = (todayAttendanceData.absent || []).filter(s => s.status === 'absent');
 
   if (allStudents.length === 0) {
     return (
@@ -1157,6 +1160,7 @@ useEffect(() => {
   return () => {
     supabase.removeChannel(attendanceSubscription);
   };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [currentAttendanceId, selectedClass?.id, selectedClass?.type, sessionActive]);
 
 useEffect(() => {
@@ -1246,7 +1250,7 @@ useEffect(() => {
         const enrollmentTable = cls.type === "Tutorial" ? "enrollment_tutorial" : "enrollment_lecture";
         const enrollIdField = cls.type === "Tutorial" ? "tutorial_id" : "course_id";
 
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from(enrollmentTable)
           .select("id")
           .eq(enrollIdField, cls.id);
@@ -1254,6 +1258,7 @@ useEffect(() => {
       };
       fetchEnrollment();
       return () => { isMounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [cls.id]);
 
     const startTime = cls.type === "Tutorial" ? cls.tutorial_start_time : cls.lecture_start_time;
@@ -1612,13 +1617,6 @@ const handleChooseMode = async (mode) => {
       const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
       const enrollmentId = student.enrollmentId || student.enrollment_id;
 
-      // Set created_at to local time in Asia/Kuala_Lumpur
-      const now = new Date();
-      // Format as 'YYYY-MM-DD HH:mm:ss' in Asia/Kuala_Lumpur
-      const localTime = now.toLocaleString('sv-SE', { timeZone: 'Asia/Kuala_Lumpur', hour12: false });
-      // Convert to ISO 8601 format (replace space with T)
-      const createdAt = localTime.replace(' ', 'T');
-
       // Find the existing attendance record for this student and session
       // Defensive: Only query if both enrollmentId and currentAttendanceId are defined
       let attendanceRecords = [];
@@ -1853,6 +1851,7 @@ const handleChooseMode = async (mode) => {
       }, timeUntilEnd)
       return () => clearTimeout(timerId)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionActive, sessionStartTime, selectedClass])
 
   if (isLoading && !selectedClass) {
@@ -2003,9 +2002,10 @@ const handleChooseMode = async (mode) => {
                 onClick={handleGenerateClassReport}
                 variant="outline"
                 className="gap-2 ml-[8px]"
+                disabled={!hasWeeklySession}
               >
                 <DownloadIcon className="h-4 w-4" />
-                Generate Report
+                Download Report
               </Button>
             </div>
           </div>

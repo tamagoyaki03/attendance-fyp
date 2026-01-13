@@ -20,7 +20,7 @@ import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
 import { format } from "date-fns";
 import supabase from "../config/supabaseClient";
-import { calculateAttendanceRate } from "../utils/attendanceUtils";
+
 
 export default function AttendanceReportsTab() {
   const [fromDate, setFromDate] = useState(new Date(2025, 0, 1));
@@ -128,7 +128,7 @@ export default function AttendanceReportsTab() {
     };
 
     fetchData();
-  }, [user?.id, fromDate, toDate]);
+  }, [user?.id, user?.role, fromDate, toDate]);
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>

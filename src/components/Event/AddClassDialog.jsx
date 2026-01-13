@@ -36,6 +36,7 @@ export default function AddClassDialog({ open, onClose, onClassAdded }) {
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [validationErrors, setValidationErrors] = useState({});
+  const [touched, setTouched] = useState({});
   const [formData, setFormData] = useState({
     code: "",
     name: "",
@@ -144,7 +145,8 @@ const handleGeocodeLocation = async () => {
   const handleClose = () => {
     document.activeElement && document.activeElement.blur();
     setLocationStatus('');
-    setValidationErrors({}); // Clear validation errors
+    setValidationErrors({});
+    setTouched({});
    
    // Reset form data when canceling
    setFormData({
@@ -169,9 +171,97 @@ const handleGeocodeLocation = async () => {
     }
   };
 
+  const validateField = (name, value) => {
+    let error = "";
+
+    switch (name) {
+      case "type":
+        if (!value) error = "Class type is required";
+        break;
+      case "parentCourseId":
+        if (formData.type === "Tutorial" && !value) error = "Lecture course is required for tutorials";
+        break;
+      case "code":
+        if (!value) error = "Class code is required";
+        break;
+      case "name":
+        if (!value) error = "Class name is required";
+        break;
+      case "lecturer":
+        if (!value) error = "Lecturer is required";
+        break;
+      case "day":
+        if (!value) error = "Day is required";
+        break;
+      case "start_time":
+        if (!value) error = "Start time is required";
+        break;
+      case "end_time":
+        if (!value) error = "End time is required";
+        else if (formData.start_time && value <= formData.start_time) {
+          error = "End time must be after start time";
+        }
+        break;
+      case "start_date":
+        if (!value) error = "Start date is required";
+        break;
+      case "end_date":
+        if (!value) error = "End date is required";
+        else if (formData.start_date && value < formData.start_date) {
+          error = "End date must be after start date";
+        }
+        break;
+      case "location":
+        if (!value) error = "Location is required";
+        break;
+      default:
+        break;
+    }
+
+    return error;
+  };
+
+  const validateForm = () => {
+    const errors = {};
+    
+    errors.type = validateField("type", formData.type);
+    if (formData.type === "Tutorial") {
+      errors.parentCourseId = validateField("parentCourseId", formData.parentCourseId);
+    }
+    errors.code = validateField("code", formData.code);
+    errors.name = validateField("name", formData.name);
+    errors.lecturer = validateField("lecturer", formData.lecturer);
+    errors.day = validateField("day", formData.day);
+    errors.start_time = validateField("start_time", formData.start_time);
+    errors.end_time = validateField("end_time", formData.end_time);
+    errors.start_date = validateField("start_date", formData.start_date);
+    errors.end_date = validateField("end_date", formData.end_date);
+    errors.location = validateField("location", formData.location);
+
+    // Filter out empty errors
+    Object.keys(errors).forEach(key => {
+      if (!errors[key]) delete errors[key];
+    });
+
+    return errors;
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    setTouched((prev) => ({ ...prev, [name]: true }));
+
+    // Validate the field
+    const error = validateField(name, value);
+    setValidationErrors((prev) => {
+      const newErrors = { ...prev };
+      if (error) {
+        newErrors[name] = error;
+      } else {
+        delete newErrors[name];
+      }
+      return newErrors;
+    });
 
     if (name === 'location') {
       if (value.toLowerCase() === 'online') {
@@ -179,6 +269,15 @@ const handleGeocodeLocation = async () => {
      } else {
        setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
      }
+    }
+
+    // If changing type, clear parent course errors
+    if (name === 'type' && value !== 'Tutorial') {
+      setValidationErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors.parentCourseId;
+        return newErrors;
+      });
     }
   };
 
@@ -199,9 +298,98 @@ const handleGeocodeLocation = async () => {
     }
   };
 
+  // Check for lecturer scheduling conflicts
+  const checkLecturerConflict = async () => {
+    if (!formData.lecturer || !formData.day || !formData.start_time || !formData.end_time) {
+      return null;
+    }
+
+    const dayNumber = DAY_TO_NUMBER[formData.day];
+
+    // Check both lecture and tutorial tables for conflicts
+    const [lectureCheck, tutorialCheck] = await Promise.all([
+      supabase
+        .from('course_lecture')
+        .select('course_code, course_title, lecture_start_time, lecture_end_time')
+        .eq('lecturer_id', formData.lecturer)
+        .eq('day_of_week', dayNumber),
+      supabase
+        .from('course_tutorial')
+        .select('course_code, course_title, tutorial_start_time, tutorial_end_time')
+        .eq('lecturer_id', formData.lecturer)
+        .eq('day_of_week', dayNumber)
+    ]);
+
+    const allClasses = [
+      ...(lectureCheck.data || []).map(c => ({
+        code: c.course_code,
+        title: c.course_title,
+        start: c.lecture_start_time,
+        end: c.lecture_end_time,
+        type: 'Lecture'
+      })),
+      ...(tutorialCheck.data || []).map(c => ({
+        code: c.course_code,
+        title: c.course_title,
+        start: c.tutorial_start_time,
+        end: c.tutorial_end_time,
+        type: 'Tutorial'
+      }))
+    ];
+
+    // Check for time overlap
+    const newStart = formData.start_time;
+    const newEnd = formData.end_time;
+
+    for (const existingClass of allClasses) {
+      // Check if times overlap
+      if (
+        (newStart >= existingClass.start && newStart < existingClass.end) ||
+        (newEnd > existingClass.start && newEnd <= existingClass.end) ||
+        (newStart <= existingClass.start && newEnd >= existingClass.end)
+      ) {
+        return existingClass;
+      }
+    }
+
+    return null;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Mark all fields as touched
+    setTouched({
+      type: true,
+      parentCourseId: true,
+      code: true,
+      name: true,
+      lecturer: true,
+      day: true,
+      start_time: true,
+      end_time: true,
+      start_date: true,
+      end_date: true,
+      location: true,
+    });
+
+    // Validate all fields
+    const errors = validateForm();
+    setValidationErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      return;
+    }
+
     setIsLoading(true);
+
+    // Check for lecturer scheduling conflicts
+    const conflict = await checkLecturerConflict();
+    if (conflict) {
+      alert(`Scheduling conflict! This lecturer is already assigned to ${conflict.type}: ${conflict.code} - ${conflict.title} on ${formData.day} from ${conflict.start} to ${conflict.end}.`);
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const dayNumber = DAY_TO_NUMBER[formData.day];
@@ -320,7 +508,17 @@ const handleGeocodeLocation = async () => {
           <Box display="grid" gap={2} gridTemplateColumns={{ xs: "1fr", md: "1fr 1fr" }}>
             <Box>
               <InputLabel htmlFor="type" sx={{ mb: 1 }}>Class Type</InputLabel>
-              <TextField select id="type" name="type" value={formData.type} onChange={handleInputChange} required sx={inputSx}>
+              <TextField 
+                select 
+                id="type" 
+                name="type" 
+                value={formData.type} 
+                onChange={handleInputChange} 
+                required 
+                sx={inputSx}
+                error={touched.type && !!validationErrors.type}
+                helperText={touched.type && validationErrors.type}
+              >
                 <MenuItem value="" disabled>Select type</MenuItem>
                 <MenuItem value="Lecture">Lecture</MenuItem>
                 <MenuItem value="Tutorial">Tutorial</MenuItem>
@@ -330,7 +528,17 @@ const handleGeocodeLocation = async () => {
             {formData.type === "Tutorial" && (
               <Box sx={{ gridColumn: "1 / -1" }}>
                 <InputLabel htmlFor="parentCourseId" sx={{ mb: 1 }}>Lecture Course</InputLabel>
-                <TextField select id="parentCourseId" name="parentCourseId" value={formData.parentCourseId} onChange={handleParentCourseChange} required sx={inputSx}>
+                <TextField 
+                  select 
+                  id="parentCourseId" 
+                  name="parentCourseId" 
+                  value={formData.parentCourseId} 
+                  onChange={handleParentCourseChange} 
+                  required 
+                  sx={inputSx}
+                  error={touched.parentCourseId && !!validationErrors.parentCourseId}
+                  helperText={touched.parentCourseId && validationErrors.parentCourseId}
+                >
                   {courses.map((course) => (
                     <MenuItem key={course.id} value={course.id}>
                       {course.course_code} - {course.course_title}
@@ -342,29 +550,80 @@ const handleGeocodeLocation = async () => {
 
             <Box>
               <InputLabel htmlFor="code" sx={{ mb: 1 }}>Class Code</InputLabel>
-              <TextField id="code" name="code" placeholder="e.g., CS101" value={formData.code} onChange={handleInputChange} required sx={inputSx} disabled={formData.type === "Tutorial"} />
+              <TextField 
+                id="code" 
+                name="code" 
+                placeholder="e.g., CS101" 
+                value={formData.code} 
+                onChange={handleInputChange} 
+                required 
+                sx={inputSx} 
+                disabled={formData.type === "Tutorial"}
+                error={touched.code && !!validationErrors.code}
+                helperText={touched.code && validationErrors.code}
+              />
             </Box>
 
             <Box>
               <InputLabel htmlFor="lecturer" sx={{ mb: 1 }}>Lecturer</InputLabel>
-              <TextField select id="lecturer" name="lecturer" value={formData.lecturer} onChange={handleInputChange} sx={inputSx}>
+              <TextField 
+                select 
+                id="lecturer" 
+                name="lecturer" 
+                value={formData.lecturer} 
+                onChange={handleInputChange} 
+                sx={inputSx}
+                error={touched.lecturer && !!validationErrors.lecturer}
+                helperText={touched.lecturer && validationErrors.lecturer}
+              >
                 {lecturers.length === 0 ? <MenuItem disabled>Loading lecturers...</MenuItem> : lecturers.map((lect) => <MenuItem key={lect.id} value={lect.id}>{lect.name}</MenuItem>)}
               </TextField>
             </Box>
 
             <Box sx={{ gridColumn: "1 / -1" }}>
               <InputLabel htmlFor="name" sx={{ mb: 1 }}>Class Name</InputLabel>
-              <TextField id="name" name="name" placeholder="e.g., Introduction to Programming" value={formData.name} onChange={handleInputChange} required fullWidth sx={inputSx} disabled={formData.type === "Tutorial"} />
+              <TextField 
+                id="name" 
+                name="name" 
+                placeholder="e.g., Introduction to Programming" 
+                value={formData.name} 
+                onChange={handleInputChange} 
+                required 
+                fullWidth 
+                sx={inputSx} 
+                disabled={formData.type === "Tutorial"}
+                error={touched.name && !!validationErrors.name}
+                helperText={touched.name && validationErrors.name}
+              />
             </Box>
 
             <Box sx={{ gridColumn: "1 / -1" }}>
-              <ScheduleInput formData={formData} handleInputChange={handleInputChange} setFormData={setFormData} />
+              <ScheduleInput 
+                formData={formData} 
+                handleInputChange={handleInputChange} 
+                setFormData={setFormData} 
+                validationErrors={validationErrors}
+                touched={touched}
+                setTouched={setTouched}
+                setValidationErrors={setValidationErrors}
+                validateField={validateField}
+              />
             </Box>
 
             <Box sx={{ gridColumn: "1 / -1" }}>
               <InputLabel htmlFor="location" sx={{ mb: 1 }}>Location</InputLabel>
               <Box display="flex" gap={1}>
-                <TextField id="location" name="location" placeholder="e.g., Room 101" value={formData.location} onChange={handleInputChange} fullWidth sx={inputSx} />
+                <TextField 
+                  id="location" 
+                  name="location" 
+                  placeholder="e.g., Room 101" 
+                  value={formData.location} 
+                  onChange={handleInputChange} 
+                  fullWidth 
+                  sx={inputSx}
+                  error={touched.location && !!validationErrors.location}
+                  helperText={touched.location && validationErrors.location}
+                />
                 <Button 
                  variant="outlined" 
                  onClick={() => setFormData(prev => ({ 

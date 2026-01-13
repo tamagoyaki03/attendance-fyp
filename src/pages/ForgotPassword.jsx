@@ -10,8 +10,10 @@ import {
   Typography,
   CircularProgress,
   Alert,
+  IconButton,
+  InputAdornment,
 } from "@mui/material"
-import { ArrowBack } from "@mui/icons-material"
+import { ArrowBack, Visibility, VisibilityOff } from "@mui/icons-material"
 import { useNavigate } from "react-router-dom"
 import { FaBell } from "react-icons/fa"
 import supabase from "../config/supabaseClient"
@@ -24,6 +26,7 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState("")
   const [otp, setOtp] = useState("")
   const [newPassword, setNewPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
   const [resetMessage, setResetMessage] = useState("")
   const navigate = useNavigate()
 
@@ -47,6 +50,28 @@ export default function ForgotPasswordPage() {
     setError("")
     setResetMessage("")
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Invalid email address");
+      setIsLoading(false);
+      return;
+    }
+
+    // Check if email exists in users table with role lecturer or admin
+    const { data: existingUser, error: checkError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", email)
+      .in("role", ["lecturer", "admin"])
+      .single();
+
+    if (checkError || !existingUser) {
+      setError("Email not registered");
+      setIsLoading(false);
+      return;
+    }
+
     const { error } = await supabase.auth.resetPasswordForEmail(email)
     setIsLoading(false)
     if (error) {
@@ -63,21 +88,58 @@ export default function ForgotPasswordPage() {
     setError("")
     setResetMessage("")
 
-    const { data, error } = await supabase.auth.verifyOtp({
+    // Validate OTP
+    if (!otp || otp.trim() === "") {
+      setError("Verification code is required");
+      setIsLoading(false);
+      return;
+    }
+
+    // Validate password
+    if (!newPassword || newPassword.trim() === "") {
+      setError("Password is required");
+      setIsLoading(false);
+      return;
+    }
+
+    // Password strength validation
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      setError("Password must have at least 8 characters, including uppercase, lowercase, number and special character.");
+      setIsLoading(false);
+      return;
+    }
+
+    // Step 1: Verify OTP
+    const { error: verifyError } = await supabase.auth.verifyOtp({
       email,
       token: otp,
       type: "recovery",
+    });
+    
+    console.log("verifyOtp result:", { error: verifyError });
+
+    if (verifyError) {
+      setError(verifyError.message);
+      setIsLoading(false);
+      return;
+    }
+
+    // Step 2: Update password after successful OTP verification
+    const { error: updateError } = await supabase.auth.updateUser({
       password: newPassword,
     });
-    console.log("verifyOtp result:", { data, error });
-    setIsLoading(false)
-    if (error) {
-      setError(error.message)
+
+    console.log("updateUser result:", { error: updateError });
+
+    setIsLoading(false);
+    if (updateError) {
+      setError(updateError.message);
     } else {
-      setResetMessage("Password reset successful! You can now log in.")
+      setResetMessage("Password reset successful! You can now log in.");
       setTimeout(() => {
-        navigate("/")
-      }, 1800)
+        navigate("/");
+      }, 1800);
     }
   }
 
@@ -183,12 +245,21 @@ export default function ForgotPasswordPage() {
                 fullWidth
                 margin="normal"
                 name="newPassword"
-                type="password"
+                type={showPassword ? "text" : "password"}
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
                 placeholder="Enter your new password"
                 sx={inputSx}
                 required
+                InputProps={{
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowPassword((prev) => !prev)} edge="end" sx={{ color: "#0f172a" }}>
+                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
               />
               {error && <Typography variant="body2" color="error">{error}</Typography>}
               {resetMessage && (

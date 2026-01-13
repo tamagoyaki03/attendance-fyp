@@ -21,8 +21,10 @@ import supabase from "../../config/supabaseClient";
 export default function ReportGenerator() {
   const [reportType, setReportType] = useState("class");
   const [identifier, setIdentifier] = useState("");
-  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
+  // eslint-disable-next-line no-unused-vars
   const [downloading, setDownloading] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
+
   const [reportData, setReportData] = useState(null);
 
   const showToast = (message, severity = "success") => {
@@ -80,7 +82,7 @@ export default function ReportGenerator() {
         statusByKey.set(key, r.status || "");
       });
 
-      const headers = ["Student", ...sessions.map((s) => s.date || s.start_time || s.id)];
+
 
       const rows = (data.enrollments || []).map((en) => {
         const name = en.users?.name || en.student_id;
@@ -394,7 +396,6 @@ export default function ReportGenerator() {
                 onChange={(e) => setReportType(e.target.value)}
                 sx={inputSx}
               >
-                <MenuItem value="session">Attendance Session</MenuItem>
                 <MenuItem value="class">Class</MenuItem>
                 <MenuItem value="student">Student</MenuItem>
               </Select>

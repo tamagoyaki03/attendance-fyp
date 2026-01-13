@@ -182,17 +182,6 @@ export default function FraudTable({ searchTerm = "" }) {
       : true
   );
 
-  const handleResolve = async (id) => {
-    await supabase
-      .from("fraud_detection_alerts")
-      .update({ status: "resolved", resolved_at: new Date().toISOString() })
-      .eq("id", id);
-
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: "resolved" } : a))
-    );
-  };
-
   const handleUpdateAttendance = async (newStatus) => {
     if (!selectedAlert?.attendance_record?.id) {
       setActionSnack({ open: true, message: "No attendance record linked to this alert.", severity: "warning" });
@@ -508,7 +497,7 @@ export default function FraudTable({ searchTerm = "" }) {
                                     // Try Asia/Kuala_Lumpur, fallback to UTC
                                     try {
                                       return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kuala_Lumpur' });
-                                    } catch (e) {
+                                    } catch {
                                       return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'UTC' });
                                     }
                                   }
@@ -558,16 +547,14 @@ export default function FraudTable({ searchTerm = "" }) {
                                     checkIn = new Date(checkInRaw);
                                   }
                                   // Debug: log parsed times
-                                  // eslint-disable-next-line no-console
                                   console.log('FraudTable: sessionStart', sessionStart, 'checkIn', checkIn);
                                   if (isNaN(sessionStart) || isNaN(checkIn)) return '-';
                                   // Calculate difference in minutes
                                   const diffMs = checkIn.getTime() - sessionStart.getTime();
                                   const diffMin = Math.round(diffMs / 60000);
                                   return `${diffMin} min${Math.abs(diffMin) !== 1 ? 's' : ''}`;
-                                } catch (e) {
-                                  // eslint-disable-next-line no-console
-                                  console.error('FraudTable: error calculating time difference', e, { sessionRaw, checkInRaw });
+                                  } catch {
+                                    console.error('FraudTable: error calculating time difference', { sessionRaw, checkInRaw });
                                   return '-';
                                 }
                               })()}
@@ -590,14 +577,11 @@ export default function FraudTable({ searchTerm = "" }) {
                 <Button variant="outlined" onClick={handleEmailStudent}>Email Student</Button>
               </Box>
               <Box display="flex" gap={1}>
-                <Button variant="outlined" color="primary" onClick={() => handleUpdateAttendance('present')}>
-                  Mark Present
-                </Button>
                 <Button variant="outlined" color="warning" onClick={() => handleUpdateAttendance('fraud')}>
                   Mark Fraud
                 </Button>
                 {selectedAlert.status && ["open", "pending"].includes(selectedAlert.status.toLowerCase()) && (
-                  <Button onClick={() => handleResolve(selectedAlert.id)} variant="contained" color="success">Resolve</Button>
+                  <Button onClick={() => handleUpdateAttendance('present')} variant="contained" color="success">Mark Present</Button>
                 )}
               </Box>
             </DialogActions>

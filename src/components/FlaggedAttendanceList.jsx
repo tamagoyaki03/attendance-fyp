@@ -425,14 +425,12 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                               checkIn = new Date(checkInRaw);
                             }
                             // Debug: log parsed times
-                            // eslint-disable-next-line no-console
                             console.log('FlaggedAttendanceList: sessionStart', sessionStart, 'checkIn', checkIn, 'usedNextDay', usedNextDay);
                             if (isNaN(sessionStart) || isNaN(checkIn)) return '-';
                             const diffMs = checkIn.getTime() - sessionStart.getTime();
                             const diffMin = Math.round(diffMs / 60000);
                             return `${diffMin} min${Math.abs(diffMin) !== 1 ? 's' : ''}`;
                           } catch (e) {
-                            // eslint-disable-next-line no-console
                             console.error('FlaggedAttendanceList: error calculating time difference', e, { sessionRaw, checkInRaw });
                             return '-';
                           }

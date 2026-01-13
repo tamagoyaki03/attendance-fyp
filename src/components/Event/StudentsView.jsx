@@ -41,6 +41,7 @@ export default function StudentView() {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [attendanceRate, setAttendanceRate] = useState(null);
+  // eslint-disable-next-line no-unused-vars
   const [totalSessions, setTotalSessions] = useState(null);
 
   const getAttendanceColor = (rate) => {
