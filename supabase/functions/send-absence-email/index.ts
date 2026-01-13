@@ -13,22 +13,34 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  let debugInfo = {};
   try {
-    const { emails, lecturerId } = await req.json()
+    debugInfo.receivedAt = new Date().toISOString();
+    debugInfo.method = req.method;
+    debugInfo.url = req.url;
+    debugInfo.headers = Object.fromEntries(req.headers.entries());
+    const { emails, lecturerId } = await req.json();
+    debugInfo.body = { emails, lecturerId };
 
     // Get Gmail credentials from environment variables
-    const GMAIL_EMAIL = Deno.env.get('GMAIL_EMAIL')
-    const GMAIL_APP_PASSWORD = Deno.env.get('GMAIL_APP_PASSWORD')
-    
+    const GMAIL_EMAIL = Deno.env.get('GMAIL_EMAIL');
+    const GMAIL_APP_PASSWORD = Deno.env.get('GMAIL_APP_PASSWORD');
+    debugInfo.gmailEmail = GMAIL_EMAIL;
+    debugInfo.gmailAppPasswordSet = !!GMAIL_APP_PASSWORD;
+
     if (!GMAIL_EMAIL || !GMAIL_APP_PASSWORD) {
-      throw new Error('Gmail credentials not configured. Set GMAIL_EMAIL and GMAIL_APP_PASSWORD.')
+      debugInfo.missingGmailCredentials = true;
+      console.error('send-absence-email: Missing Gmail credentials', debugInfo);
+      throw new Error('Gmail credentials not configured. Set GMAIL_EMAIL and GMAIL_APP_PASSWORD.');
     }
 
     // Initialize Supabase client for logging
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    );
+    debugInfo.supabaseUrl = Deno.env.get('SUPABASE_URL');
+    debugInfo.supabaseServiceRoleKeySet = !!Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
     // Create SMTP client
     const client = new SMTPClient({
@@ -41,10 +53,10 @@ serve(async (req) => {
           password: GMAIL_APP_PASSWORD,
         },
       },
-    })
+    });
 
-    const sentEmails = []
-    const failedEmails = []
+    const sentEmails = [];
+    const failedEmails = [];
 
     // Send each email using Gmail SMTP
     for (const emailData of emails) {
@@ -55,30 +67,43 @@ serve(async (req) => {
           subject: emailData.subject,
           content: emailData.html,
           html: emailData.html,
-        })
+        });
 
-        console.log(`✅ Email sent successfully to ${emailData.to}`)
-        
+        console.log(`✅ Email sent successfully to ${emailData.to}`);
+        debugInfo.lastSentEmail = emailData.to;
+
         // Log to database
-        await supabaseClient
+        const logRes = await supabaseClient
           .from('absence_emails')
           .insert({
             student_id: emailData.studentId,
             lecturer_id: lecturerId,
-          })
+          });
+        debugInfo.lastDbLog = logRes.error ? logRes.error.message : 'success';
 
-        sentEmails.push(emailData.to)
+        sentEmails.push(emailData.to);
 
       } catch (error) {
-        console.error(`❌ Failed to send email to ${emailData.to}:`, error)
+        console.error(`❌ Failed to send email to ${emailData.to}:`, error);
         failedEmails.push({
           email: emailData.to,
           error: error.message
-        })
+        });
+        debugInfo.lastFailedEmail = emailData.to;
+        debugInfo.lastFailedError = error.message;
       }
     }
 
-    await client.close()
+    await client.close();
+    debugInfo.smtpClosed = true;
+
+    console.log('send-absence-email: Summary', {
+      sentCount: sentEmails.length,
+      failedCount: failedEmails.length,
+      sentEmails,
+      failedEmails,
+      debugInfo
+    });
 
     return new Response(
       JSON.stringify({
@@ -87,27 +112,30 @@ serve(async (req) => {
         failedCount: failedEmails.length,
         sentEmails,
         failedEmails,
+        debugInfo,
         message: `Sent ${sentEmails.length} of ${emails.length} emails successfully`
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200,
       },
-    )
+    );
 
   } catch (error) {
-    console.error('Error in send-absence-email function:', error)
+    debugInfo.generalError = error.message;
+    console.error('send-absence-email: General error', debugInfo);
     return new Response(
       JSON.stringify({
         success: false,
         error: error.message,
         sentCount: 0,
-        failedCount: 0
+        failedCount: 0,
+        debugInfo
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       },
-    )
+    );
   }
 })
