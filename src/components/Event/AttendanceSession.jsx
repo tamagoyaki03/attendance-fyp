@@ -32,31 +32,19 @@ async function saveSessionPassword(sessionId, password) {
       const currentDate = localDate.toISOString().split('T')[0];
       // Format HH:MM:SS
       const currentTime = localDate.toTimeString().split(' ')[0];
-      // created_at as local time (Asia/Kuala_Lumpur, with offset)
-      // Build ISO string with +08:00 offset
-      const pad = (n) => n.toString().padStart(2, '0');
-      const year = localDate.getFullYear();
-      const month = pad(localDate.getMonth() + 1);
-      const day = pad(localDate.getDate());
-      const hour = pad(localDate.getHours());
-      const minute = pad(localDate.getMinutes());
-      const second = pad(localDate.getSeconds());
-      const createdAt = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
 
       // Calculate end time (assuming 2-hour sessions, adjust as needed)
       const endDateTime = new Date(localDate.getTime() + (2 * 60 * 60 * 1000));
       const endHour = pad(endDateTime.getHours());
       const endMinute = pad(endDateTime.getMinutes());
       const endSecond = pad(endDateTime.getSeconds());
-      const endTimeStr = `${endHour}:${endMinute}:${endSecond}`;
 
       console.log("Saving session data:", {
         sessionId,
         password,
         date: currentDate,
         start_time: currentTime,
-        end_time: endTimeStr,
-        created_at: createdAt
+        end_time: `${endHour}:${endMinute}:${endSecond}`
       });
 
       // Add timeout to the database query
@@ -67,7 +55,7 @@ async function saveSessionPassword(sessionId, password) {
             attendance_password: password,
             date: currentDate,
             start_time: currentTime,
-            created_at: createdAt
+            end_time: `${endHour}:${endMinute}:${endSecond}`
           })
           .eq("id", sessionId),
         new Promise((_, reject) => 
@@ -146,16 +134,12 @@ export default function AttendanceSession({
   const creatingSession = useRef(false);
   const fraudChannelRef = useRef(null);
 
-  // End attendance, update end_time, and send absence emails
+  // End attendance, update end_time, and note that emails are sent by scheduled job
   const handleEndAttendance = async () => {
     await updateSessionEndTime(sessionId);
     
-    // Get current user (lecturer) from sessionStorage
-    const user = JSON.parse(sessionStorage.getItem("user") || "{}");
-    if (user?.id) {
-      // Send absence emails immediately after ending session
-      await sendAbsenceEmailsAfterLectureEnd(user.id);
-    }
+    // NOTE: Absence emails are NOT sent here immediately. They are sent automatically by sendAbsenceEmailsAfterLectureEnd
+    // after the class end_time has passed. This is done via the scheduled interval check in AttendanceManagement.jsx
     
     if (onFinalize) {
       onFinalize();
@@ -267,7 +251,7 @@ useEffect(() => {
               }
               
               const maxKm = settings?.max_distance_km || 1.0;
-              const timeBufferMinutes = settings?.time_buffer_minutes || 5;
+              const timeBufferMinutes = settings?.time_buffer_minutes || 1;
               
               const channel = await startFraudMonitoring(sessionId, { maxKm, timeBufferMinutes });
               fraudChannelRef.current = channel;
@@ -340,14 +324,12 @@ useEffect(() => {
       }}
     >
       <DialogTitle>
-        {sessionType === "start" ? "Start Attendance Session" : "End Attendance Session"}
+        Attendance Session
       </DialogTitle>
 
       <DialogContent>
         <DialogContentText sx={{ mb: 2 }}>
-          {sessionType === "start"
-            ? "Display this QR code for students to scan and check in."
-            : "Display this QR code for students to scan and check out."}
+          Display this QR code for students to scan and check in.
         </DialogContentText>
 
         <Box display="flex" flexDirection="column" alignItems="center" py={2}>
@@ -387,7 +369,7 @@ useEffect(() => {
 
             <Box display="flex" justifyContent="space-between" mb={1}>
               <Typography color="text.secondary">Session Type:</Typography>
-              <Chip label={sessionType === "start" ? "Check-in" : "Check-out"} variant="outlined" color={sessionType === "start" ? "success" : "warning"} />
+              <Chip label="Check-in" variant="outlined" color="success" />
             </Box>
 
             {location && (
@@ -411,7 +393,7 @@ useEffect(() => {
       </DialogContent>
 
       <DialogActions sx={{ px: 3, py: 2 }}>
-        <Button onClick={handleEndAttendance} variant="contained" color="error">End Attendance</Button>
+        <Button onClick={handleEndAttendance} variant="contained" color="primary">Close</Button>
       </DialogActions>
     </Dialog>
   );

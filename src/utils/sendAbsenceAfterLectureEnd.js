@@ -1,77 +1,367 @@
 import supabase from "../config/supabaseClient";
 import { sendAbsenceNotificationEmails, getEmailSettings } from "./emailUtils";
 
+// Track sessions we've already processed today to prevent spam
+const processedSessionsToday = new Set();
+
+// Reset processed sessions at midnight
+let lastResetDate = new Date().toDateString();
+
+function checkAndResetProcessedSessions() {
+  const today = new Date().toDateString();
+  if (today !== lastResetDate) {
+    processedSessionsToday.clear();
+    lastResetDate = today;
+  }
+}
+
 /**
  * Checks if any attendance sessions have ended (course_lecture.lecture_end_time < now) and sends absence emails if not already sent.
  * Should be called periodically (e.g., via setInterval or useEffect in AttendanceManagementPage).
  */
 export async function sendAbsenceEmailsAfterLectureEnd(userId) {
+  checkAndResetProcessedSessions();
+  const now = new Date();
+  
   // 1. Get all lectures for this lecturer
   const { data: lectures, error: lectureError } = await supabase
     .from("course_lecture")
-    .select("id, course_code, course_title, lecture_end_time, lecturer_id")
+    .select("id, course_code, course_title, lecture_end_time, lecturer_id, day_of_week")
     .eq("lecturer_id", userId);
   if (lectureError) {
     console.error("Error fetching lectures:", lectureError);
     return;
   }
-  const now = new Date();
-  for (const lecture of lectures) {
+
+  // 2. Get all tutorials for this lecturer
+  const { data: tutorials, error: tutorialError } = await supabase
+    .from("course_tutorial")
+    .select("id, course_code, course_title, tutorial_end_time, lecturer_id, day_of_week")
+    .eq("lecturer_id", userId);
+  if (tutorialError) {
+    console.error("Error fetching tutorials:", tutorialError);
+    return;
+  }
+
+  // Process lectures
+  for (const lecture of lectures || []) {
     if (!lecture.lecture_end_time) continue;
+    
+    // Check if today is the class day
+    const currentDay = now.getDay();
+    if (lecture.day_of_week !== currentDay) continue;
+    
     // Parse lecture_end_time as today (assume format HH:mm:ss)
     const [h, m, s] = lecture.lecture_end_time.split(":").map(Number);
     const endDate = new Date(now);
     endDate.setHours(h, m, s || 0, 0);
-    if (now < endDate) continue; // Not ended yet
-    // 2. Find attendance_session for this lecture
+    
+    // Only send emails if end_time has been reached AND within 1 hour after
+    if (now <= endDate) continue; // Not ended yet
+    
+    const oneHourAfterEnd = new Date(endDate.getTime() + 60 * 60 * 1000);
+    if (now > oneHourAfterEnd) continue; // More than 1 hour has passed
+    
+    // Find attendance_session for this lecture TODAY
+    const today = now.toISOString().split('T')[0];
     const { data: sessions, error: sessionError } = await supabase
       .from("attendance_session")
       .select("id, created_at")
-      .eq("course_lecture_id", lecture.id);
+      .eq("course_lecture_id", lecture.id)
+      .eq("date", today);
+      
     if (sessionError || !sessions || sessions.length === 0) continue;
+    
     for (const session of sessions) {
-      // 3. Check if absence emails already sent (log in absence_emails table)
+      // Check in-memory cache first to prevent spam
+      if (processedSessionsToday.has(session.id)) {
+        console.log(`Session ${session.id} already processed today, skipping...`);
+        continue;
+      }
+      
+      // Check if absence emails already sent
       const { data: emailsSent, error: emailLogError } = await supabase
         .from("absence_emails")
         .select("id")
         .eq("session_id", session.id);
-      if (emailsSent && emailsSent.length > 0) continue; // Already sent
-      // 4. Get enrolled students
+      
+      if (emailLogError) {
+        console.error(`Error checking if emails already sent for session ${session.id}:`, emailLogError);
+        continue;
+      }
+      
+      if (emailsSent && emailsSent.length > 0) {
+        console.log(`Emails already sent for lecture ${lecture.course_code} session ${session.id}, skipping...`);
+        processedSessionsToday.add(session.id); // Add to cache
+        continue; // Already sent
+      }
+      
+      console.log(`Processing absence emails for lecture ${lecture.course_code}, session ${session.id}`);
+      
+      // Get enrolled students
       const { data: enrolled, error: enrollError } = await supabase
         .from("enrollment_lecture")
-        .select("student_id")
-        .eq("id", lecture.id);
+        .select("student_id, id")
+        .eq("course_id", lecture.id);
       if (enrollError) continue;
-      const enrolledIds = (enrolled || []).map(e => e.student_id);
-      // 5. Get present students
+      
+      // Get present students
       const { data: presentRecords, error: presentError } = await supabase
         .from("attendance_record")
-        .select("student_id")
+        .select("lecture_enrollment_id")
         .eq("session_id", session.id)
         .eq("status", "present");
       if (presentError) continue;
-      const presentIds = (presentRecords || []).map(r => r.student_id);
-      // 6. Absent = enrolled - present
-      const absentIds = enrolledIds.filter(id => !presentIds.includes(id));
+      
+      const presentEnrollmentIds = (presentRecords || []).map(r => r.lecture_enrollment_id);
+      
+      // Find absent students
+      const absentEnrollments = (enrolled || []).filter(e => !presentEnrollmentIds.includes(e.id));
+      const absentIds = absentEnrollments.map(e => e.student_id);
+      
       if (absentIds.length === 0) continue;
-      // 7. Get absent students' emails
+      
+      // Check for approved MC submissions for this session or date
+      const sessionDate = session.created_at ? new Date(session.created_at).toISOString().split('T')[0] : today;
+      const { data: approvedMCs, error: mcError } = await supabase
+        .from("mc_submissions")
+        .select("student_id")
+        .in("student_id", absentIds)
+        .eq("status", "approved")
+        .or(`session_id.eq.${session.id},absence_date.eq.${sessionDate}`);
+      
+      if (mcError) {
+        console.error(`Error checking MC submissions for session ${session.id}:`, mcError);
+      }
+      
+      // Check for approved leave requests covering this date
+      const { data: approvedLeaves, error: leaveError } = await supabase
+        .from("leave_requests")
+        .select("user_id, date_time")
+        .in("user_id", absentIds)
+        .eq("status", "approved")
+        .gte("date_time", `${sessionDate}T00:00:00`)
+        .lte("date_time", `${sessionDate}T23:59:59`);
+      
+      if (leaveError) {
+        console.error(`Error checking leave requests for session ${session.id}:`, leaveError);
+      }
+      
+      // Exclude students with approved MCs or leave requests
+      const studentsWithMC = (approvedMCs || []).map(mc => mc.student_id);
+      const studentsWithLeave = (approvedLeaves || []).map(leave => leave.user_id);
+      const excludedStudents = [...new Set([...studentsWithMC, ...studentsWithLeave])];
+      const absentIdsWithoutMC = absentIds.filter(id => !excludedStudents.includes(id));
+      
+      if (absentIdsWithoutMC.length === 0) {
+        console.log(`All absent students have approved MCs/leaves for lecture ${lecture.course_code} session ${session.id}, skipping emails...`);
+        continue;
+      }
+      
+      // Get absent students' emails (excluding those with approved MCs)
       const { data: users, error: userError } = await supabase
         .from("users")
         .select("id, email, name")
-        .in("id", absentIds);
+        .in("id", absentIdsWithoutMC);
       if (userError) continue;
-      // 8. Get email template
+      
+      // Get email template
       const emailSettings = await getEmailSettings(lecture.lecturer_id);
-      // 9. Send emails
+      
+      // Send emails
+      console.log(`Sending absence emails to ${users.length} students (${excludedStudents.length} excluded with approved MCs/leaves: ${studentsWithMC.length} MCs, ${studentsWithLeave.length} leaves) for lecture ${lecture.course_code}`);
       await sendAbsenceNotificationEmails(users, lecture, emailSettings.emailTemplate, lecture.lecturer_id, session.id);
-      // 10. Log sent (insert into absence_emails)
+      
+      // Log sent
+      console.log(`Logging sent emails for session ${session.id}`);
       for (const student of users) {
-        await supabase.from("absence_emails").insert({
+        // Check if already logged to prevent duplicates
+        const { data: existing } = await supabase
+          .from("absence_emails")
+          .select("id")
+          .eq("student_id", student.id)
+          .eq("session_id", session.id)
+          .single();
+        
+        if (existing) {
+          console.log(`Email already logged for student ${student.id}, session ${session.id}, skipping...`);
+          continue;
+        }
+        
+        const { error: insertError } = await supabase.from("absence_emails").insert({
           student_id: student.id,
           lecturer_id: lecture.lecturer_id,
           session_id: session.id
         });
+        if (insertError) {
+          console.error(`Error logging sent email for student ${student.id}:`, insertError);
+        }
       }
+      
+      // Mark session as processed to prevent duplicate sends
+      processedSessionsToday.add(session.id);
+      
+      console.log(`Completed absence email processing for lecture ${lecture.course_code} session ${session.id}`);
+    }
+  }
+
+  // Process tutorials
+  for (const tutorial of tutorials || []) {
+    if (!tutorial.tutorial_end_time) continue;
+    
+    // Check if today is the class day
+    const currentDay = now.getDay();
+    if (tutorial.day_of_week !== currentDay) continue;
+    
+    // Parse tutorial_end_time as today (assume format HH:mm:ss)
+    const [h, m, s] = tutorial.tutorial_end_time.split(":").map(Number);
+    const endDate = new Date(now);
+    endDate.setHours(h, m, s || 0, 0);
+    
+    // Only send emails if end_time has been reached AND within 1 hour after
+    if (now <= endDate) continue; // Not ended yet
+    
+    const oneHourAfterEnd = new Date(endDate.getTime() + 60 * 60 * 1000);
+    if (now > oneHourAfterEnd) continue; // More than 1 hour has passed
+    
+    // Find attendance_session for this tutorial TODAY
+    const today = now.toISOString().split('T')[0];
+    const { data: sessions, error: sessionError } = await supabase
+      .from("attendance_session")
+      .select("id, created_at")
+      .eq("course_tutorial_id", tutorial.id)
+      .eq("date", today);
+      
+    if (sessionError || !sessions || sessions.length === 0) continue;
+    
+    for (const session of sessions) {
+      // Check in-memory cache first to prevent spam
+      if (processedSessionsToday.has(session.id)) {
+        console.log(`Session ${session.id} already processed today, skipping...`);
+        continue;
+      }
+      
+      // Check if absence emails already sent
+      const { data: emailsSent, error: emailLogError } = await supabase
+        .from("absence_emails")
+        .select("id")
+        .eq("session_id", session.id);
+      
+      if (emailLogError) {
+        console.error(`Error checking if emails already sent for session ${session.id}:`, emailLogError);
+        continue;
+      }
+      
+      if (emailsSent && emailsSent.length > 0) {
+        console.log(`Emails already sent for tutorial ${tutorial.course_code} session ${session.id}, skipping...`);
+        processedSessionsToday.add(session.id); // Add to cache
+        continue; // Already sent
+      }
+      
+      console.log(`Processing absence emails for tutorial ${tutorial.course_code}, session ${session.id}`);
+      
+      // Get enrolled students
+      const { data: enrolled, error: enrollError } = await supabase
+        .from("enrollment_tutorial")
+        .select("student_id, id")
+        .eq("tutorial_id", tutorial.id);
+      if (enrollError) continue;
+      
+      // Get present students
+      const { data: presentRecords, error: presentError } = await supabase
+        .from("attendance_record")
+        .select("tutorial_enrollment_id")
+        .eq("session_id", session.id)
+        .eq("status", "present");
+      if (presentError) continue;
+      
+      const presentEnrollmentIds = (presentRecords || []).map(r => r.tutorial_enrollment_id);
+      
+      // Find absent students
+      const absentEnrollments = (enrolled || []).filter(e => !presentEnrollmentIds.includes(e.id));
+      const absentIds = absentEnrollments.map(e => e.student_id);
+      
+      if (absentIds.length === 0) continue;
+      
+      // Check for approved MC submissions for this session or date
+      const sessionDate = session.created_at ? new Date(session.created_at).toISOString().split('T')[0] : today;
+      const { data: approvedMCs, error: mcError } = await supabase
+        .from("mc_submissions")
+        .select("student_id")
+        .in("student_id", absentIds)
+        .eq("status", "approved")
+        .or(`session_id.eq.${session.id},absence_date.eq.${sessionDate}`);
+      
+      if (mcError) {
+        console.error(`Error checking MC submissions for session ${session.id}:`, mcError);
+      }
+      
+      // Check for approved leave requests covering this date
+      const { data: approvedLeaves, error: leaveError } = await supabase
+        .from("leave_requests")
+        .select("user_id, date_time")
+        .in("user_id", absentIds)
+        .eq("status", "approved")
+        .gte("date_time", `${sessionDate}T00:00:00`)
+        .lte("date_time", `${sessionDate}T23:59:59`);
+      
+      if (leaveError) {
+        console.error(`Error checking leave requests for session ${session.id}:`, leaveError);
+      }
+      
+      // Exclude students with approved MCs or leave requests
+      const studentsWithMC = (approvedMCs || []).map(mc => mc.student_id);
+      const studentsWithLeave = (approvedLeaves || []).map(leave => leave.user_id);
+      const excludedStudents = [...new Set([...studentsWithMC, ...studentsWithLeave])];
+      const absentIdsWithoutMC = absentIds.filter(id => !excludedStudents.includes(id));
+      
+      if (absentIdsWithoutMC.length === 0) {
+        console.log(`All absent students have approved MCs/leaves for tutorial ${tutorial.course_code} session ${session.id}, skipping emails...`);
+        continue;
+      }
+      
+      // Get absent students' emails (excluding those with approved MCs)
+      const { data: users, error: userError } = await supabase
+        .from("users")
+        .select("id, email, name")
+        .in("id", absentIdsWithoutMC);
+      if (userError) continue;
+      
+      // Get email template
+      const emailSettings = await getEmailSettings(tutorial.lecturer_id);
+      
+      // Send emails
+      console.log(`Sending absence emails to ${users.length} students (${excludedStudents.length} excluded with approved MCs/leaves: ${studentsWithMC.length} MCs, ${studentsWithLeave.length} leaves) for tutorial ${tutorial.course_code}`);
+      await sendAbsenceNotificationEmails(users, tutorial, emailSettings.emailTemplate, tutorial.lecturer_id, session.id);
+      
+      // Log sent
+      console.log(`Logging sent emails for session ${session.id}`);
+      for (const student of users) {        // Check if already logged to prevent duplicates
+        const { data: existing } = await supabase
+          .from("absence_emails")
+          .select("id")
+          .eq("student_id", student.id)
+          .eq("session_id", session.id)
+          .single();
+        
+        if (existing) {
+          console.log(`Email already logged for student ${student.id}, tutorial session ${session.id}, skipping...`);
+          continue;
+        }
+                const { error: insertError } = await supabase.from("absence_emails").insert({
+          student_id: student.id,
+          lecturer_id: tutorial.lecturer_id,
+          session_id: session.id
+        });
+        if (insertError) {
+          console.error(`Error logging sent email for student ${student.id}:`, insertError);
+        }
+      }
+      
+      // Mark session as processed to prevent duplicate sends
+      processedSessionsToday.add(session.id);
+      
+      console.log(`Completed absence email processing for tutorial ${tutorial.course_code} session ${session.id}`);
     }
   }
 }

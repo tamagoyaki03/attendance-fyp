@@ -47,10 +47,10 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
             startDate = subDays(today, 30);
         }
 
-        // Fetch all sessions in range
+        // Fetch all sessions in range with course info
         const { data: sessionsData } = await supabase
           .from("attendance_session")
-          .select("id, date")
+          .select("id, date, course_lecture_id, course_tutorial_id")
           .gte("date", format(startDate, "yyyy-MM-dd"))
           .lte("date", format(today, "yyyy-MM-dd"))
           .order("date", { ascending: true });
@@ -68,6 +68,27 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
           attendanceRecords = recordsData || [];
         }
 
+        // Fetch enrollments for each course to calculate total possible attendance
+        const courseEnrollments = {};
+        
+        // Get lecture enrollments
+        for (const session of sessions) {
+          if (session.course_lecture_id && !courseEnrollments[`lecture_${session.course_lecture_id}`]) {
+            const { data: enrollments } = await supabase
+              .from("enrollment_lecture")
+              .select("id")
+              .eq("course_id", session.course_lecture_id);
+            courseEnrollments[`lecture_${session.course_lecture_id}`] = (enrollments || []).length;
+          }
+          if (session.course_tutorial_id && !courseEnrollments[`tutorial_${session.course_tutorial_id}`]) {
+            const { data: enrollments } = await supabase
+              .from("enrollment_tutorial")
+              .select("id")
+              .eq("tutorial_id", session.course_tutorial_id);
+            courseEnrollments[`tutorial_${session.course_tutorial_id}`] = (enrollments || []).length;
+          }
+        }
+
         // Group by date or month
         let chartData = [];
         if (isMonthly) {
@@ -83,8 +104,19 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
             const monthSessionIds = monthSessions.map((s) => s.id);
             const monthRecords = attendanceRecords.filter((r) => monthSessionIds.includes(r.session_id));
             const presentCount = monthRecords.filter((r) => r.status === "present").length;
-            const total = monthRecords.length;
-            const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+            
+            // Calculate total possible attendance for this month
+            let totalPossible = 0;
+            monthSessions.forEach(session => {
+              if (session.course_lecture_id) {
+                totalPossible += courseEnrollments[`lecture_${session.course_lecture_id}`] || 0;
+              }
+              if (session.course_tutorial_id) {
+                totalPossible += courseEnrollments[`tutorial_${session.course_tutorial_id}`] || 0;
+              }
+            });
+            
+            const rate = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
 
             return {
               date: format(month, "MMM"),
@@ -100,8 +132,19 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
             const daySessionIds = daySessions.map((s) => s.id);
             const dayRecords = attendanceRecords.filter((r) => daySessionIds.includes(r.session_id));
             const presentCount = dayRecords.filter((r) => r.status === "present").length;
-            const total = dayRecords.length;
-            const rate = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+            
+            // Calculate total possible attendance for this day
+            let totalPossible = 0;
+            daySessions.forEach(session => {
+              if (session.course_lecture_id) {
+                totalPossible += courseEnrollments[`lecture_${session.course_lecture_id}`] || 0;
+              }
+              if (session.course_tutorial_id) {
+                totalPossible += courseEnrollments[`tutorial_${session.course_tutorial_id}`] || 0;
+              }
+            });
+            
+            const rate = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
 
             return {
               date: format(day, "MMM d"),
@@ -110,13 +153,7 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
           });
         }
 
-        // Calculate average
-        const avgAttendance = chartData.length > 0
-          ? Math.round(chartData.reduce((sum, d) => sum + d.attendance, 0) / chartData.length)
-          : 0;
-
-        const dataWithAvg = chartData.map((d) => ({ ...d, average: avgAttendance }));
-        setData(dataWithAvg);
+        setData(chartData);
       } catch (error) {
         console.error("Error fetching attendance trends:", error);
         setData([]);
@@ -159,7 +196,7 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
         <YAxis
           stroke={isDark ? "#ccc" : "#333"}
           tick={{ fontSize: 12 }}
-          domain={[75, 95]}
+          domain={[0, 100]}
           tickFormatter={(value) => `${value}%`}
         />
         <Tooltip
@@ -179,15 +216,6 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
           strokeWidth={2}
           dot={{ r: 4 }}
           activeDot={{ r: 6, stroke: theme.palette.primary.main, strokeWidth: 2 }}
-        />
-        <Line
-          type="monotone"
-          dataKey="average"
-          name="Average"
-          stroke={theme.palette.grey[500]}
-          strokeWidth={2}
-          strokeDasharray="5 5"
-          dot={false}
         />
       </LineChart>
     </ResponsiveContainer>

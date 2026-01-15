@@ -91,7 +91,6 @@ async function getSessionContext(sessionId) {
 async function upsertIssue({
   userId,
   sessionId,
-  courseCode,
   type,
   description,
   latitude,
@@ -119,24 +118,27 @@ async function upsertIssue({
     return existing.id;
   }
 
+  // Build insert object without course_code to avoid schema cache issues
+  const insertData = {
+    user_id: userId,
+    session_id: sessionId,
+    alert_type: type,
+    description,
+    status: "open",
+  };
+  
+  // Add optional fields only if they have values
+  if (latitude != null) insertData.latitude = latitude;
+  if (longitude != null) insertData.longitude = longitude;
+  if (expectedLatitude != null) insertData.expected_latitude = expectedLatitude;
+  if (expectedLongitude != null) insertData.expected_longitude = expectedLongitude;
+  if (distanceKm != null) insertData.distance_km = distanceKm;
+  if (expectedTime) insertData.expected_time = expectedTime;
+  if (actualTime) insertData.actual_time = actualTime;
+
   const { data, error } = await supabase
     .from("fraud_detection_alerts")
-    .insert({
-      user_id: userId,
-      session_id: sessionId,
-      course_code: courseCode,
-      alert_type: type,
-      description,
-      latitude,
-      longitude,
-      expected_latitude: expectedLatitude,
-      expected_longitude: expectedLongitude,
-      distance_km: distanceKm,
-      expected_time: expectedTime,
-      actual_time: actualTime,
-      severity,
-      status: "open",
-    })
+    .insert(insertData)
     .select("id")
     .single();
 
@@ -152,72 +154,163 @@ async function analyzeRecord(sessionId, record, ctx, opts) {
   const { classInfo, courseCode, enrollmentMap, start, end } = ctx;
   const { maxKm = 1.0, timeBufferMinutes = 5 } = opts || {};
 
-  const userId = record.lecture_enrollment_id
-    ? enrollmentMap[record.lecture_enrollment_id]
-    : enrollmentMap[record.tutorial_enrollment_id];
+  console.log("🔍 ANALYZE_RECORD START");
+  console.log("  Record ID:", record.id);
+  console.log("  Record enrollment IDs:", { lecture: record.lecture_enrollment_id, tutorial: record.tutorial_enrollment_id });
+  console.log("  Record location:", { lat: record?.latitude, lng: record?.longitude });
+  console.log("  Class info:", classInfo);
+  console.log("  EnrollmentMap keys:", Object.keys(enrollmentMap || {}));
+  console.log("  MaxKm:", maxKm, "| TimeBuffer:", timeBufferMinutes, "mins");
 
-  if (!userId) return issues;
+  const created = record?.created_at ? new Date(record.created_at) : null;
+  const reasons = [];
 
-  // Location anomaly
+  const enrollmentKey = record.lecture_enrollment_id || record.tutorial_enrollment_id;
+  let userId = enrollmentKey ? enrollmentMap?.[enrollmentKey] : undefined;
+  
+  console.log("  Enrollment Key:", enrollmentKey);
+  console.log("  UserId from enrollmentMap:", userId || "NOT FOUND");
+
+  // If userId not in map, look it up from the enrollment table
+  if (!userId && enrollmentKey) {
+    console.log("  🔍 UserId not in enrollmentMap, looking up from database...");
+    const isTutorial = record.tutorial_enrollment_id != null;
+    const tableName = isTutorial ? "enrollment_tutorial" : "enrollment_lecture";
+    const { data, error } = await supabase
+      .from(tableName)
+      .select("student_id")
+      .eq("id", enrollmentKey)
+      .single();
+    
+    if (!error && data) {
+      userId = data.student_id;
+      console.log("  ✅ Found userId from", tableName + ":", userId);
+    } else {
+      console.log("  ❌ Failed to find userId:", error?.message || "No data");
+    }
+  }
+
+  // If userId is still missing, we still flag the attendance record; fraud alerts will be skipped.
+
+  // Location anomaly detection
+  let distance = null;
+  let hasLocationAnomaly = false;
   if (
     classInfo?.lat != null &&
     classInfo?.lng != null &&
     record?.latitude != null &&
     record?.longitude != null
   ) {
-    const distance = haversineKm(
+    console.log("  ✓ All location values present, calculating distance...");
+    distance = haversineKm(
       Number(classInfo.lat),
       Number(classInfo.lng),
       Number(record.latitude),
       Number(record.longitude)
     );
+    console.log("  📏 Distance calculated:", distance.toFixed(2), "km (max allowed:", maxKm, "km)");
     if (distance > maxKm) {
-      const severity = distance > 5 ? "high" : distance > 2 ? "medium" : "low";
-      await upsertIssue({
-        userId,
-        sessionId,
-        courseCode,
-        type: "Location Anomaly",
-        description: `Check-in ${distance.toFixed(2)} km away from class location (max ${maxKm} km).`,
-        latitude: Number(record.latitude),
-        longitude: Number(record.longitude),
-        expectedLatitude: Number(classInfo.lat),
-        expectedLongitude: Number(classInfo.lng),
-        distanceKm: distance,
-        actualTime: record.created_at,
-        severity,
-      });
+      console.log("  ⚠️  LOCATION ANOMALY DETECTED - Distance", distance.toFixed(2), ">", maxKm);
+      hasLocationAnomaly = true;
       issues.push({
         type: "Location Anomaly",
-        description: `Check-in ${distance.toFixed(2)} km away from class location (>${maxKm} km).`,
+        description: `Check-in ${distance.toFixed(2)} km away from class location.`,
       });
+      reasons.push(`Far from class: ${distance.toFixed(2)}km`);
+    } else {
+      console.log("  ✓ Distance OK:", distance.toFixed(2), "km <=", maxKm, "km");
     }
+  } else {
+    console.log("  ✗ Missing location data - cannot calculate distance");
+    console.log("    classInfo.lat:", classInfo?.lat, "classInfo.lng:", classInfo?.lng);
+    console.log("    record.latitude:", record?.latitude, "record.longitude:", record?.longitude);
   }
 
-  // Time anomaly
-  if (start && end && record?.created_at) {
-    const created = new Date(record.created_at);
+  // Time anomaly detection
+  let hasTimeAnomaly = false;
+  let isEarly = false;
+  if (start && end && created) {
     const early = new Date(start.getTime() - timeBufferMinutes * 60 * 1000);
     const late = new Date(end.getTime() + timeBufferMinutes * 60 * 1000);
     if (created < early || created > late) {
-      const isEarly = created < early;
-      const severity = isEarly && created < start ? "high" : "medium";
-      await upsertIssue({
-        userId,
-        sessionId,
-        courseCode,
-        type: "Time Anomaly",
-        description: `Check-in at ${created.toISOString()} outside session window (${start.toISOString()} - ${end.toISOString()}).`,
-        expectedTime: start,
-        actualTime: record.created_at,
-        severity,
-      });
+      isEarly = created < early;
+      hasTimeAnomaly = true;
       issues.push({
         type: "Time Anomaly",
         description: `Check-in at ${created.toISOString()} outside session window (${start.toISOString()} - ${end.toISOString()}).`,
       });
+      // Only show late check-ins, not early - and prevent duplicates
+      if (!isEarly && !reasons.includes(`Late for Check In`)) {
+        reasons.push(`Late for Check In`);
+      }
     }
   }
+
+  // Create single combined fraud alert if any anomaly detected
+  if (userId && (hasLocationAnomaly || hasTimeAnomaly)) {
+    const anomalyType = hasLocationAnomaly && hasTimeAnomaly ? "Combined Anomaly" : 
+                       hasLocationAnomaly ? "Location Anomaly" : "Time Anomaly";
+    
+    // Use the same format as flag_reason: simple and readable
+    let description = "";
+    if (hasLocationAnomaly && hasTimeAnomaly) {
+      description = `Far from class: ${distance.toFixed(2)}km\nLate for Check In`;
+    } else if (hasLocationAnomaly) {
+      description = `Far from class: ${distance.toFixed(2)}km`;
+    } else if (hasTimeAnomaly) {
+      description = isEarly ? `Early Check In` : `Late for Check In`;
+    }
+    
+    const severity = (distance && distance > 5) || (isEarly && created < start) ? "high" : 
+                    (distance && distance > 2) ? "medium" : "low";
+    
+    await upsertIssue({
+      userId,
+      sessionId,
+      type: anomalyType,
+      description,
+      latitude: hasLocationAnomaly ? Number(record.latitude) : null,
+      longitude: hasLocationAnomaly ? Number(record.longitude) : null,
+      expectedLatitude: hasLocationAnomaly ? Number(classInfo.lat) : null,
+      expectedLongitude: hasLocationAnomaly ? Number(classInfo.lng) : null,
+      distanceKm: distance,
+      expectedTime: hasTimeAnomaly ? start : null,
+      actualTime: record.created_at,
+      severity,
+    });
+  }
+
+  // Flag the attendance record in-place when any anomaly occurs
+  console.log("  📋 Reasons detected:", reasons.length, "Record ID:", record?.id);
+  
+  if (reasons.length && record?.id) {
+    const reasonText = reasons.join("\n");
+    try {
+      console.log("  🚩 FLAGGING attendance_record:", record.id);
+      console.log("     Reason:", reasonText);
+      const { data, error } = await supabase
+        .from("attendance_record")
+        .update({ status: "flagged", flag_reason: reasonText })
+        .eq("id", record.id);
+      
+      if (error) {
+        console.error("  ❌ FAILED TO FLAG - Error:", error);
+        console.error("     Code:", error.code);
+        console.error("     Message:", error.message);
+        console.error("     Details:", error.details);
+      } else {
+        console.log("  ✅ SUCCESSFULLY FLAGGED attendance_record:", record.id);
+        console.log("     Response:", data);
+      }
+    } catch (flagErr) {
+      console.error("  ❌ EXCEPTION while flagging attendance_record:", flagErr);
+    }
+  } else {
+    console.log("  ℹ️  No anomalies detected - attendance_record NOT flagged");
+    console.log("     Reasons:", reasons.length, "| Record ID:", record?.id);
+  }
+  
+  console.log("🔍 ANALYZE_RECORD END\n");
 
   return issues;
 }
@@ -225,14 +318,20 @@ async function analyzeRecord(sessionId, record, ctx, opts) {
 // Start realtime monitoring for a session: analyze new attendance_record inserts
 export async function startFraudMonitoring(sessionId, options = {}) {
   try {
+    console.log("🔍 Starting fraud monitoring for session:", sessionId, "with options:", options);
     const ctx = await getSessionContext(sessionId);
+    console.log("📍 Session context loaded:", { classInfo: ctx.classInfo, enrollmentMap: Object.keys(ctx.enrollmentMap) });
 
     // Analyze existing records once (in case some inserted before monitor starts)
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from("attendance_record")
       .select("id, session_id, created_at, latitude, longitude, status, lecture_enrollment_id, tutorial_enrollment_id")
       .eq("session_id", sessionId);
+    
+    console.log("📋 Existing attendance records found:", existing?.length || 0, "error:", existingError);
+    
     for (const rec of existing || []) {
+      console.log("🔍 Analyzing existing record:", rec.id);
       await analyzeRecord(sessionId, rec, ctx, options);
     }
 
@@ -240,17 +339,40 @@ export async function startFraudMonitoring(sessionId, options = {}) {
       .channel(`fraud-monitor-${sessionId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'attendance_record', filter: `session_id=eq.${sessionId}` },
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'attendance_record', 
+          filter: `session_id=eq.${sessionId}` 
+        },
         async (payload) => {
+          console.log("🆕 New attendance_record INSERT detected:", payload.new.id);
+          console.log("   Session ID:", payload.new.session_id);
+          console.log("   Expected session:", sessionId);
+          console.log("   Full Payload:", JSON.stringify(payload.new, null, 2));
           const rec = payload.new;
           await analyzeRecord(sessionId, rec, ctx, options);
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        console.log("📡 Fraud monitoring subscription status:", status);
+        if (err) {
+          console.error("   ❌ Subscription error:", err);
+        }
+        if (status === 'SUBSCRIBED') {
+          console.log("   ✅ Listening for INSERT events on attendance_record for session:", sessionId);
+          console.log("   Filter: session_id=eq." + sessionId);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error("   ❌ Channel error - subscription failed!");
+        } else if (status === 'TIMED_OUT') {
+          console.error("   ❌ Subscription timed out!");
+        }
+      });
 
+    console.log("✅ Fraud monitoring started successfully for session:", sessionId);
     return channel;
   } catch (e) {
-    console.error("Failed to start fraud monitoring:", e);
+    console.error("❌ Failed to start fraud monitoring:", e);
     return null;
   }
 }

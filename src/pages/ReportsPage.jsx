@@ -28,8 +28,9 @@ export default function ReportsPage() {
       </div>
 
       <main
-        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
-        style={{ minHeight: "100vh" }}
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
       >
         <div>
           <h2
@@ -43,7 +44,7 @@ export default function ReportsPage() {
               className="text-[14px] font-inter font-normal leading-[17px] text-left"
               style={{ color: "#374151" }}
             >
-              View and generate various reports related to attendance, absences, and fraud detection.
+              View and generate various reports related to attendance.
             </p>
           </div>
         </div>
@@ -69,7 +70,7 @@ export default function ReportsPage() {
                 <CardHeader
                   sx={{ pb: 0 }}
                   title={<Typography variant="h6" fontWeight="bold" color="text.primary">Attendance Reports</Typography>}
-                  subheader={<Typography variant="body2" color="text.secondary">Generate and view attendance summaries and trends.</Typography>}
+                  subheader={<Typography variant="body2" color="text.secondary">Generate and view attendance summaries.</Typography>}
                 />
                 <CardContent>
                   <AttendanceReportsTab />
@@ -81,7 +82,7 @@ export default function ReportsPage() {
                   <CardHeader
                     sx={{ pb: 0 }}
                     title={<Typography variant="h6" fontWeight="bold" color="text.primary">Report Generator</Typography>}
-                    subheader={<Typography variant="body2" color="text.secondary">Create custom reports for download or email.</Typography>}
+                    subheader={<Typography variant="body2" color="text.secondary">Create custom reports for download.</Typography>}
                   />
                   <CardContent>
                     <ReportGenerator />
@@ -96,7 +97,7 @@ export default function ReportsPage() {
               <CardHeader
                 sx={{ pb: 0 }}
                 title={<Typography variant="h6" fontWeight="bold" color="text.primary">Absence Reports</Typography>}
-                subheader={<Typography variant="body2" color="text.secondary">View absence statistics, MC submissions and leave trends.</Typography>}
+                subheader={<Typography variant="body2" color="text.secondary">View absence statistics.</Typography>}
               />
               <CardContent>
                 <AbsenceReportsTab />

@@ -63,11 +63,33 @@ export default function StudentView() {
       // Step 2: Fetch all enrollment records
       const { data: enrollmentData, error: enrollmentError } = await supabase
         .from("enrollment_lecture")
-        .select("student_id");
+        .select("course_id, student_id");
 
-      if (!usersError && !enrollmentError && usersData && enrollmentData) {
+      // Step 3: Fetch all courses to check which are archived
+      const { data: coursesData, error: coursesError } = await supabase
+        .from("course_lecture")
+        .select("id, lecture_end_date");
+
+      if (!usersError && !enrollmentError && !coursesError && usersData && enrollmentData && coursesData) {
+        // Create a map of archived course IDs
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const archivedCourseIds = new Set();
+        coursesData.forEach(course => {
+          if (course.lecture_end_date) {
+            const courseEndDate = new Date(course.lecture_end_date);
+            if (courseEndDate < today) {
+              archivedCourseIds.add(course.id);
+            }
+          }
+        });
+
+        // Count only active (non-archived) enrollments
         const classCountMap = enrollmentData.reduce((acc, row) => {
-          acc[row.student_id] = (acc[row.student_id] || 0) + 1;
+          if (!archivedCourseIds.has(row.course_id)) {
+            acc[row.student_id] = (acc[row.student_id] || 0) + 1;
+          }
           return acc;
         }, {});
 
@@ -155,6 +177,22 @@ export default function StudentView() {
     if (filterStatus !== "all") {
       filtered = filtered.filter((student) => student.status === filterStatus);
     }
+    
+    // Sort by student ID: numeric first, then text
+    filtered.sort((a, b) => {
+      const aIsNumeric = /^\d+$/.test(a.studentId);
+      const bIsNumeric = /^\d+$/.test(b.studentId);
+      
+      if (aIsNumeric && !bIsNumeric) return -1;
+      if (!aIsNumeric && bIsNumeric) return 1;
+      
+      if (aIsNumeric && bIsNumeric) {
+        return parseInt(a.studentId) - parseInt(b.studentId);
+      }
+      
+      return a.studentId.localeCompare(b.studentId);
+    });
+    
     return filtered;
   }, [students, searchTerm, filterStatus]);
 

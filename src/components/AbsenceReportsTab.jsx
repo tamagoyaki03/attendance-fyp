@@ -14,6 +14,7 @@ import {
   Box,
   CircularProgress,
   Alert,
+  Chip,
 } from "@mui/material";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
@@ -42,8 +43,8 @@ export default function AbsenceReportsTab() {
 
       try {
         // Fetch classes: all if admin, only lecturer's if lecturer
-        let lectureQuery = supabase.from("course_lecture").select("id, course_code, course_title");
-        let tutorialQuery = supabase.from("course_tutorial").select("id, course_code, course_title");
+        let lectureQuery = supabase.from("course_lecture").select("id, course_code, course_title, lecture_end_date");
+        let tutorialQuery = supabase.from("course_tutorial").select("id, course_code, course_title, tutorial_end_date");
         
         if (user.role !== "admin") {
           lectureQuery = lectureQuery.eq("lecturer_id", user.id);
@@ -56,8 +57,8 @@ export default function AbsenceReportsTab() {
         if (tutorialRes.error) throw tutorialRes.error;
 
         const courseItems = [
-          ...(lectureRes.data || []).map((c) => ({ ...c, classType: "Lecture" })),
-          ...(tutorialRes.data || []).map((c) => ({ ...c, classType: "Tutorial" })),
+          ...(lectureRes.data || []).map((c) => ({ ...c, classType: "Lecture", endDate: c.lecture_end_date })),
+          ...(tutorialRes.data || []).map((c) => ({ ...c, classType: "Tutorial", endDate: c.tutorial_end_date })),
         ];
 
         // Format date range for filtering
@@ -141,17 +142,28 @@ export default function AbsenceReportsTab() {
               .limit(1)
               .maybeSingle();
 
-            const lastAbsence = latestSession?.date || latestSession?.created_at || null;
+            const totalStudents = stats.totalStudents || 0;
 
             return {
               class: course.course_code || course.course_title,
               totalAbsences,
               excused,
               unexcused,
-              lastAbsence: lastAbsence ? format(new Date(lastAbsence), "PPP") : "-",
+              totalSessions: stats.totalSessions || 0,
+              totalStudents: totalStudents,
+              isArchived: course.endDate ? new Date(course.endDate) < new Date() : false,
             };
           })
         );
+
+        // Sort: active classes first, then archived at bottom
+        summaries.sort((a, b) => {
+          if (a.isArchived !== b.isArchived) {
+            return a.isArchived ? 1 : -1;
+          }
+          // Secondary sort by class name
+          return (a.class || '').localeCompare(b.class || '');
+        });
 
         setRows(summaries);
       } catch (err) {
@@ -200,36 +212,60 @@ export default function AbsenceReportsTab() {
                   <TableCell>Total Absences</TableCell>
                   <TableCell>Excused</TableCell>
                   <TableCell>Unexcused</TableCell>
-                  <TableCell>Last Absence</TableCell>
+                  <TableCell>Total Sessions</TableCell>
+                  <TableCell>Total Students</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                       <CircularProgress size={20} />
                     </TableCell>
                   </TableRow>
                 ) : error ? (
                   <TableRow>
-                    <TableCell colSpan={5}>
+                    <TableCell colSpan={6}>
                       <Alert severity="error">{error}</Alert>
                     </TableCell>
                   </TableRow>
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 3 }}>
+                    <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
                       <Typography color="text.secondary">No absences found.</Typography>
                     </TableCell>
                   </TableRow>
                 ) : (
                   rows.map((row, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>{row.class}</TableCell>
+                    <TableRow 
+                      key={idx}
+                      sx={{
+                        opacity: row.isArchived ? 0.6 : 1,
+                        backgroundColor: row.isArchived ? '#f9fafb' : 'inherit'
+                      }}
+                    >
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          {row.class}
+                          {row.isArchived && (
+                            <Chip 
+                              label="Archived" 
+                              size="small"
+                              sx={{ 
+                                backgroundColor: '#fecaca', 
+                                color: '#991b1b',
+                                fontWeight: 600,
+                                height: 24
+                              }} 
+                            />
+                          )}
+                        </Box>
+                      </TableCell>
                       <TableCell>{row.totalAbsences}</TableCell>
                       <TableCell>{typeof row.excused === 'number' ? row.excused : String(row.excused).charAt(0).toUpperCase() + String(row.excused).slice(1)}</TableCell>
                       <TableCell>{row.unexcused}</TableCell>
-                      <TableCell>{row.lastAbsence}</TableCell>
+                      <TableCell>{row.totalSessions}</TableCell>
+                      <TableCell>{row.totalStudents}</TableCell>
                     </TableRow>
                   ))
                 )}

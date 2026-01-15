@@ -10,8 +10,7 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import Box from "@mui/material/Box";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
-import Snackbar from "@mui/material/Snackbar";
-import MuiAlert from "@mui/material/Alert";
+import Toast from "../components/Toast";
 import { v4 as uuidv4 } from "uuid";
 import DownloadIcon from "@mui/icons-material/Download";
 import LocationOnIcon from "@mui/icons-material/LocationOn";
@@ -33,6 +32,7 @@ import OnlineAttendanceDialog from "./Dialogs/onlineAttendanceDialog";
 import ViewDetailsButton from "../components/ViewDetailsButton";
 import * as XLSX from 'xlsx';
 import { sendAbsenceNotificationEmails, getEmailSettings } from "../utils/emailUtils";
+import Loading from "../components/Loading";
 
 const DAY_NUMBER_TO_NAME = {
   0: "Sunday",
@@ -104,7 +104,7 @@ export default function AttendanceManagementPage() {
     return () => clearInterval(interval);
   }, [user?.id]);
 
-  const handleOnlineProceed = async ({ recordingLink, quizContent }) => {
+  const handleOnlineProceed = async ({ recordingLink, quizContent, minWatchTime }) => {
   setOnlineDialogOpen(false);
   setIsLoading(true);
 
@@ -115,6 +115,7 @@ export default function AttendanceManagementPage() {
       longitude: null,
       recording_url: recordingLink,
       quiz_questions: quizContent,
+      min_watch_time: minWatchTime ? parseInt(minWatchTime) : null,
       course_lecture_id: null,
       course_tutorial_id: null,
    };
@@ -136,6 +137,11 @@ export default function AttendanceManagementPage() {
     setClassAttendance(data);
     setSessionActive(true);
     setSessionStartTime(new Date());
+    
+    // Refresh attendance status and data after creating online session
+    await checkTodayAttendance();
+    await fetchTodayAttendanceData(data.id);
+    
     setSnackbar({
       open: true,
       message: "Online attendance session started.",
@@ -175,16 +181,12 @@ export default function AttendanceManagementPage() {
   }, [user.id]);
 
   useEffect(() => {
-  // Only validate when we have complete class data
-  if (selectedClass && selectedClass.startTime && selectedClass.endTime) {
-    validateAttendanceTime();
-  } else {
-    // Set default state when data is not ready
-    setCanStartAttendance(false);
-    setTimeValidationMessage("Loading class schedule...");
-  }
+    if (selectedClass) {
+      checkTodayAttendance();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [selectedClass?.id, selectedClass?.startTime, selectedClass?.endTime, todayAttendanceStatus]);
+  }, [selectedClass]);
+
 
   useEffect(() => {
     if (selectedClass) {
@@ -215,29 +217,85 @@ export default function AttendanceManagementPage() {
       const session = todaySessions[0]; // Get the latest session
       setCurrentAttendanceId(session.id);
 
-      // Check if session is completed (has end_time)
-      if (session.end_time) {
-        setTodayAttendanceStatus('taken');
-      } else {
-        setTodayAttendanceStatus('in_progress');
-        setSessionActive(true);
-      }
+      // Check if session is still active (no end_time means session hasn't been finalized)
+      // Sessions created with start_time but no end_time are considered active
+      const now = new Date();
+      const sessionEndTime = session.end_time ? new Date(session.end_time) : null;
+      const isSessionActive = !sessionEndTime || sessionEndTime > now;
+
+      // If a session exists today, mark as taken
+      setTodayAttendanceStatus('taken');
+      setSessionActive(isSessionActive); // true if session is still ongoing
+      setCanStartAttendance(false);
+      setTimeValidationMessage('Attendance has been taken for today');
 
       // Fetch attendance data using this session
       await fetchTodayAttendanceData(session.id);
     } else {
-      // No session today, but check if there's one this week and fetch that data
+      // No session today
       setTodayAttendanceStatus('not_taken');
+      setCurrentAttendanceId(null);
       
-      // This will look for any session this week and display that data
+      // Fetch any session from this week and display that data
       await fetchTodayAttendanceData(); // No session ID = look for week's session
       
-      validateAttendanceTime();
+      // Validate timing with 'not_taken' status passed directly
+      // This ensures validation uses the correct status immediately
+      if (selectedClass.startTime && selectedClass.endTime) {
+        const now = new Date();
+        const currentDay = now.getDay();
+        const currentTime = now.toTimeString().slice(0, 5);
+        const classDay = selectedClass.day_of_week;
+        const startTime = selectedClass.startTime;
+        const endTime = selectedClass.endTime;
+
+        let expectedJsDay = typeof classDay === 'number' ? classDay % 7 : 0;
+        if (typeof classDay !== 'number') {
+          const dayMap = { "Sunday": 0, "Monday": 1, "Tuesday": 2, "Wednesday": 3, "Thursday": 4, "Friday": 5, "Saturday": 6 };
+          expectedJsDay = dayMap[classDay] ?? 0;
+        }
+
+        const isCorrectDay = currentDay === expectedJsDay;
+        const [startHour, startMin] = startTime.split(':').map(Number);
+        const [endHour, endMin] = endTime.split(':').map(Number);
+        const [currentHour, currentMin] = currentTime.split(':').map(Number);
+
+        const classStartMinutes = startHour * 60 + startMin; // Start at exact class time
+        const classEndMinutes = endHour * 60 + endMin; // Exact end time
+        const classEndMinutesMinus20 = classEndMinutes - 20; // 20 min before end
+        const currentMinutes = currentHour * 60 + currentMin;
+
+        // Allow starting attendance only during class time (from start until 20 min before end)
+        const isCorrectTime = currentMinutes >= classStartMinutes && currentMinutes < classEndMinutesMinus20;
+        const canStart = isCorrectDay && isCorrectTime;
+
+        setCanStartAttendance(canStart);
+        
+        if (!isCorrectDay) {
+          const dayName = DAY_NUMBER_TO_NAME[classDay] || 'Unknown';
+          setTimeValidationMessage(`Today is not the scheduled day for this class. This class is scheduled for ${dayName}.`);
+        } else if (!isCorrectTime) {
+          if (currentMinutes < classStartMinutes) {
+            setTimeValidationMessage(`Too early. Attendance can start at ${startTime.slice(0, 5)} (class start time).`);
+          } else if (currentMinutes >= classEndMinutes) {
+            // Class has completely ended
+            setTimeValidationMessage(`Class has ended. Cannot start attendance after ${endTime.slice(0, 5)}.`);
+          } else if (currentMinutes >= classEndMinutesMinus20) {
+            const cutoffTime = new Date();
+            cutoffTime.setHours(Math.floor(classEndMinutesMinus20 / 60), classEndMinutesMinus20 % 60);
+            setTimeValidationMessage(`Too late. Attendance stopped at ${cutoffTime.toTimeString().slice(0, 5)} (20 minutes before class end).`);
+          }
+        } else {
+          setTimeValidationMessage('Ready to start attendance');
+        }
+      }
     }
   } catch (error) {
     console.error("Error checking today's attendance:", error);
     setTodayAttendanceStatus('not_taken');
-    await fetchTodayAttendanceData(); // Still try to fetch week's data
+    setCanStartAttendance(false);
+    setTimeValidationMessage('Error loading class data');
+    await fetchTodayAttendanceData();
   } finally {
     setIsLoading(false);
   }
@@ -306,7 +364,13 @@ export default function AttendanceManagementPage() {
 
       if (!weekSessionError && weekSessions && weekSessions.length > 0) {
         weekSession = weekSessions[0];
-        setCurrentAttendanceId(weekSession.id); // Update current attendance ID
+        // Only update currentAttendanceId if not already set (don't override active session)
+        if (!currentAttendanceId) {
+          console.log('📝 fetchTodayAttendanceData - setting currentAttendanceId to:', weekSession.id);
+          setCurrentAttendanceId(weekSession.id);
+        } else {
+          console.log('⚠️ fetchTodayAttendanceData - PRESERVING existing currentAttendanceId:', currentAttendanceId, 'Found session:', weekSession.id);
+        }
       }
     }
 
@@ -427,14 +491,17 @@ export default function AttendanceManagementPage() {
         sessionDate: weekSession.created_at
       };
       allStudents.push(studentObj);
-      // Always push a new object to avoid reference issues
-      if (flag_reason) {
+      
+      // Categorize by status - flagged is a separate status
+      if (status === 'flagged') {
+        // Flagged students go to flagged tab only
         flaggedStudents.push({ ...studentObj, classLocation });
       } else if (status === 'present') {
         presentStudents.push({ ...studentObj });
       } else if (status === 'excused') {
         excusedStudents.push({ ...studentObj });
       } else {
+        // Status is 'absent' or undefined
         absentStudents.push({ ...studentObj });
       }
     });
@@ -458,8 +525,21 @@ export default function AttendanceManagementPage() {
 };
 
 // Function to validate if attendance can be started based on day and time
-const validateAttendanceTime = () => {
+const validateAttendanceTime = (statusOverride = null) => {
   if (!selectedClass) return;
+
+  // Check if class is archived
+  const endDate = selectedClass.type === "Lecture" ? selectedClass.lecture_end_date : selectedClass.tutorial_end_date;
+  if (endDate) {
+    const classEndDate = new Date(endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (classEndDate < today) {
+      setCanStartAttendance(false);
+      setTimeValidationMessage("This class has been archived and attendance cannot be recorded.");
+      return;
+    }
+  }
 
   const now = new Date();
   const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
@@ -490,7 +570,7 @@ const validateAttendanceTime = () => {
   // Check if today is the correct day
   const isCorrectDay = currentDay === expectedJsDay;
 
-  // Check if current time is within class time (allow 15 minutes before and after)
+  // Check if current time is within class time (allow 15 minutes before, but stop 20 minutes before end)
   let isCorrectTime = false;
   let timeMessage = '';
 
@@ -500,21 +580,27 @@ const validateAttendanceTime = () => {
     const [currentHour, currentMin] = currentTime.split(':').map(Number);
 
     // Convert to minutes for easier comparison
-    const classStartMinutes = startHour * 60 + startMin - 15; // 15 min before
-    const classEndMinutes = endHour * 60 + endMin + 15; // 15 min after
+    const classStartMinutes = startHour * 60 + startMin - 15; // 15 min before start
+    const classEndMinutes = endHour * 60 + endMin; // Exact end time
+    const classEndMinutesMinus20 = classEndMinutes - 20; // 20 min before end
     const currentMinutes = currentHour * 60 + currentMin;
 
-    isCorrectTime = currentMinutes >= classStartMinutes && currentMinutes <= classEndMinutes;
+    // Allow attendance from 15 min before start until 20 min before end
+    // Also prevent starting after class has completely ended
+    isCorrectTime = currentMinutes >= classStartMinutes && currentMinutes < classEndMinutesMinus20;
 
     if (!isCorrectTime) {
       if (currentMinutes < classStartMinutes) {
         const allowedStartTime = new Date();
         allowedStartTime.setHours(Math.floor(classStartMinutes / 60), classStartMinutes % 60);
         timeMessage = `Too early. Attendance can start at ${allowedStartTime.toTimeString().slice(0, 5)} (15 minutes before class).`;
-      } else {
-        const allowedEndTime = new Date();
-        allowedEndTime.setHours(Math.floor(classEndMinutes / 60), classEndMinutes % 60);
-        timeMessage = `Too late. Attendance period ended at ${allowedEndTime.toTimeString().slice(0, 5)} (15 minutes after class).`;
+      } else if (currentMinutes >= classEndMinutes) {
+        // Class has completely ended
+        timeMessage = `Class has ended. Cannot start attendance after ${endTime.slice(0, 5)}.`;
+      } else if (currentMinutes >= classEndMinutesMinus20) {
+        const cutoffTime = new Date();
+        cutoffTime.setHours(Math.floor(classEndMinutesMinus20 / 60), classEndMinutesMinus20 % 60);
+        timeMessage = `Too late. Attendance stopped at ${cutoffTime.toTimeString().slice(0, 5)} (20 minutes before class end).`;
       }
     }
   } else {
@@ -526,11 +612,13 @@ const validateAttendanceTime = () => {
     timeMessage = `Today is not the scheduled day for this class. This class is scheduled for ${dayName}.`;
   }
 
-  const canStart = isCorrectDay && isCorrectTime && todayAttendanceStatus === 'not_taken';
+  // Use statusOverride if provided (for initial validation), otherwise use state
+  const attendanceStatus = statusOverride !== null ? statusOverride : todayAttendanceStatus;
+  const canStart = isCorrectDay && isCorrectTime && attendanceStatus === 'not_taken';
 
   setCanStartAttendance(canStart);
   setTimeValidationMessage(timeMessage);
-}; 
+};
 
 // Render attendance status and data
 const renderTodayAttendanceStatus = () => {
@@ -570,23 +658,6 @@ const renderTodayAttendanceStatus = () => {
         {renderAttendanceStatsSection()}
         
         {/* Show attendance list */}
-        {renderAttendanceList()}
-      </Box>
-    );
-  }
-
-  if (todayAttendanceStatus === 'in_progress') {
-    return (
-      <Box>
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          <AlertTitle>Attendance In Progress</AlertTitle>
-          An attendance session is currently active for this class.
-        </Alert>
-        
-        {/* Show AttendanceStats for active sessions */}
-        {renderAttendanceStatsSection()}
-
-        {/* Show attendance list for in-progress sessions */}
         {renderAttendanceList()}
       </Box>
     );
@@ -648,14 +719,21 @@ const renderAttendanceList = () => {
 
   return (
     <Box>
-      <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} sx={{ 
-    mb: 2,
-    '& .MuiTab-root': {
-      minHeight: 40, // Set smaller minimum height for tabs
-      padding: '6px 12px', // Reduce padding
-    }
-  }}
->
+      <Tabs 
+        value={activeTab} 
+        onChange={(event, newValue) => {
+          setActiveTab(newValue);
+        }} 
+        sx={{ 
+          mb: 2,
+          position: 'relative',
+          zIndex: 11,
+          '& .MuiTab-root': {
+            minHeight: 40,
+            padding: '6px 12px',
+          }
+        }}
+      >
         <Tab 
           label={`Present (${(todayAttendanceData.present || []).length})`} 
           value="present"
@@ -814,9 +892,9 @@ const renderAttendanceList = () => {
              // Combine date and start_time if both exist, else fallback to start_time
              let sessionStartTime = classAttendance?.start_time;
              if (classAttendance?.date && classAttendance?.start_time) {
-               sessionStartTime = `${classAttendance.date}T${classAttendance.start_time}`;
+               sessionStartTime = `${classAttendance.date}T${classAttendance.start_time}+08:00`;
              }
-             const sessionInfo = { sessionId: currentAttendanceId, start_time: sessionStartTime };
+             const sessionInfo = { sessionId: currentAttendanceId, start_time: sessionStartTime, date: classAttendance?.date };
              console.log('sessionInfo passed to FlaggedAttendanceList', sessionInfo);
              return (
                <FlaggedAttendanceList
@@ -843,6 +921,7 @@ const handleSelectStudent = async (student) => {
         if (!currentAttendanceId || !student.enrollmentId) {
           setSelectedStudent(student);
           setShowStudentDetails(true);
+          setIsLoading(false);
           return;
         }
         const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
@@ -855,7 +934,7 @@ const handleSelectStudent = async (student) => {
 
         const { data: attendanceRecord, error: attendanceError } = await supabase
           .from("attendance_record")
-          .select("*, latitude, longitude, created_at, status, verification_data")
+          .select("*, latitude, longitude, status, verification_data, session_id")
           .eq("session_id", currentAttendanceId)
           .eq(attendanceField, student.enrollmentId)
           .single();
@@ -870,13 +949,34 @@ const handleSelectStudent = async (student) => {
         const classLocationData = await getClassLocationData();
         console.log("Class location data:", classLocationData);
 
+        // Fetch session start time if attendance record exists
+        let sessionStartTime = null;
+        if (attendanceRecord?.session_id) {
+          try {
+            const { data: session, error: sessionError } = await supabase
+              .from("attendance_session")
+              .select("created_at")
+              .eq("id", attendanceRecord.session_id)
+              .single();
+
+            if (!sessionError && session?.created_at) {
+              // Add 8 hours to convert from UTC to GMT+8 (Asia/Kuala_Lumpur)
+              const utcDate = new Date(session.created_at);
+              const localDate = new Date(utcDate.getTime() + (8 * 60 * 60 * 1000));
+              sessionStartTime = localDate.toISOString();
+            }
+          } catch (sessionErr) {
+            console.error("Error fetching session start time:", sessionErr);
+          }
+        }
 
         // Enhance student object with attendance record data
         const enhancedStudent = {
           ...student,
           attendanceRecord: attendanceRecord || null,
           classLocation: classLocationData,
-          classType: selectedClass.type, 
+          classType: selectedClass.type,
+          sessionStartTime: sessionStartTime,
           isOnlineClass: selectedClass?.location?.toLowerCase().includes('online') || 
                         selectedClass?.lecture_location?.toLowerCase().includes('online') ||
                         selectedClass?.tutorial_location?.toLowerCase().includes('online')
@@ -888,11 +988,11 @@ const handleSelectStudent = async (student) => {
       }
       
       setShowStudentDetails(true);
+      setIsLoading(false);
     } catch (error) {
       console.error("Error fetching student details:", error);
       setSelectedStudent(student);
       setShowStudentDetails(true);
-    } finally {
       setIsLoading(false);
     }
   }
@@ -940,6 +1040,16 @@ const handleCloseStudentDetails = () => {
 };
 
   const handleStartSession = () => {
+   // Prevent starting a new session if one is already active
+   if (sessionActive) {
+     setSnackbar({
+       open: true,
+       message: "Attendance session is already in progress.",
+       severity: "error"
+     });
+     return;
+   }
+
    if (todayAttendanceStatus === 'taken') {
      setSnackbar({
        open: true,
@@ -1150,15 +1260,17 @@ useEffect(() => {
       },
       (payload) => {
         console.log('Real-time attendance change detected:', payload);
-        // Refresh counts and attendance list
-        fetchCounts();
-        fetchTodayAttendanceData(currentAttendanceId);
+        // Refresh counts and attendance list with slight delay to ensure DB is updated
+        setTimeout(() => {
+          fetchCounts();
+          fetchTodayAttendanceData(currentAttendanceId);
+        }, 100);
       }
     )
     .subscribe();
 
   return () => {
-    supabase.removeChannel(attendanceSubscription);
+    attendanceSubscription.unsubscribe();
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [currentAttendanceId, selectedClass?.id, selectedClass?.type, sessionActive]);
@@ -1243,6 +1355,8 @@ useEffect(() => {
 
   function ClassCardWithEnrollmentCount({ cls, addresses, onClick }) {
     const [totalStudents, setTotalStudents] = React.useState(null);
+    const [isClassActive, setIsClassActive] = React.useState(false);
+    const [isClassArchived, setIsClassArchived] = React.useState(false);
 
     React.useEffect(() => {
       let isMounted = true;
@@ -1261,43 +1375,96 @@ useEffect(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [cls.id]);
 
+    // Check if class is archived (end_date has passed)
+    React.useEffect(() => {
+      const endDate = cls.type === "Lecture" ? cls.lecture_end_date : cls.tutorial_end_date;
+      if (endDate) {
+        const classEndDate = new Date(endDate);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        setIsClassArchived(classEndDate < today);
+      } else {
+        setIsClassArchived(false);
+      }
+    }, [cls]);
+
+    // Check if class is currently active (same day and within time range)
+    React.useEffect(() => {
+      const checkIfActive = () => {
+        const now = new Date();
+        const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+
+        const classDay = cls.day_of_week;
+        const startTime = cls.type === "Tutorial" ? cls.tutorial_start_time : cls.lecture_start_time;
+        const endTime = cls.type === "Tutorial" ? cls.tutorial_end_time : cls.lecture_end_time;
+
+        // Check if today is the class day
+        const isCorrectDay = currentDay === classDay;
+
+        // Check if current time is within class time
+        let isCorrectTime = false;
+        if (startTime && endTime && isCorrectDay) {
+          isCorrectTime = currentTime >= startTime.slice(0, 5) && currentTime <= endTime.slice(0, 5);
+        }
+
+        setIsClassActive(isCorrectDay && isCorrectTime);
+      };
+
+      checkIfActive();
+      // Update every minute to check if class is still active
+      const interval = setInterval(checkIfActive, 60000);
+      return () => clearInterval(interval);
+    }, [cls]);
+
     const startTime = cls.type === "Tutorial" ? cls.tutorial_start_time : cls.lecture_start_time;
     const endTime = cls.type === "Tutorial" ? cls.tutorial_end_time : cls.lecture_end_time;
     const location = cls.type === "Tutorial" ? cls.tutorial_location : cls.lecture_location;
 
     return (
       <Card
-        onClick={onClick}
+        onClick={isClassArchived ? undefined : onClick}
         sx={{
-          cursor: "pointer",
+          cursor: isClassArchived ? "not-allowed" : "pointer",
           mb: 2,
-          background: "#ffffff",
-          border: "1px solid #e2e8f0",
+          background: isClassArchived ? "#f9fafb" : isClassActive ? "#dcfce7" : "#ffffff",
+          border: isClassArchived ? "1px solid #d1d5db" : isClassActive ? "2px solid #22c55e" : "1px solid #e2e8f0",
           boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+          opacity: isClassArchived ? 0.6 : 1,
         }}
       >
         <CardContent sx={{ p: 2 }}>
-          <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
-            {cls.course_code}: {cls.course_title}
-          </Typography>
-
-          <Typography
-              variant="caption"
+          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
+                {cls.course_code}: {cls.course_title}
+              </Typography>
+              {isClassArchived && (
+                <Chip 
+                  label="Archived" 
+                  size="small" 
+                  sx={{ 
+                    backgroundColor: "#fecaca", 
+                    color: "#991b1b", 
+                    fontWeight: 600,
+                    height: "24px",
+                  }}
+                />
+              )}
+            </Box>
+            <Chip
+              label={cls.type || "Lecture"}
+              size="small"
               sx={{
                 backgroundColor: cls.type === "Lecture" ? "#dbeafe" : "#fce7f3",
                 color: cls.type === "Lecture" ? "#0c4a6e" : "#831843",
-                px: 1.5,
-                py: 0.5,
-                borderRadius: 1,
                 fontWeight: 600,
-                whiteSpace: "nowrap",
-                ml: 1,
+                height: "24px",
               }}
-            >
-              {cls.type || "Lecture"}
-            </Typography>
+            />
+          </Box>
 
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography variant="body2" color="text.secondary">
             {cls.day_of_week && startTime && endTime
               ? `${DAY_NUMBER_TO_NAME[cls.day_of_week] || cls.day_of_week}, ${cls.startTime.slice(0, 5)} - ${cls.endTime.slice(0, 5)}`
               : "No schedule info"}
@@ -1383,25 +1550,21 @@ const handleChooseMode = async (mode) => {
         setCurrentLocation(null);
       }
 
-      // Create attendance session payload - explicitly set both columns
-      // Get local time in Asia/Kuala_Lumpur for created_at with +08:00 offset
+      // Create attendance session payload - let created_at use database default (now())
+      // Set date and start_time for today's session tracking
       const now = new Date();
       const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
-      const pad = (n) => n.toString().padStart(2, '0');
-      const year = localDate.getFullYear();
-      const month = pad(localDate.getMonth() + 1);
-      const day = pad(localDate.getDate());
-      const hour = pad(localDate.getHours());
-      const minute = pad(localDate.getMinutes());
-      const second = pad(localDate.getSeconds());
-      const createdAt = `${year}-${month}-${day}T${hour}:${minute}:${second}+08:00`;
+      const currentDate = localDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      const currentTime = localDate.toTimeString().split(' ')[0]; // HH:MM:SS
+      
       const insertData = {
         latitude: location.lat,
         longitude: location.lng,
         attendance_password: specialPassword,
         course_lecture_id: null,
         course_tutorial_id: null,
-        created_at: createdAt,
+        date: currentDate,
+        start_time: currentTime,
       };
 
       // Determine type and set ONLY the correct column
@@ -1425,9 +1588,14 @@ const handleChooseMode = async (mode) => {
       }
 
       setCurrentAttendanceId(data.id);
+      console.log('🟢 SESSION STARTED - currentAttendanceId set to:', data.id);
       setCurrentSessionPassword(specialPassword);
       setSessionType("start");
       setQrDialogOpen(true);
+
+      // Mark attendance as taken for today to prevent duplicate sessions
+      setTodayAttendanceStatus('taken');
+      setCanStartAttendance(false);
 
       setSnackbar({
         open: true,
@@ -1469,39 +1637,8 @@ const handleChooseMode = async (mode) => {
 
   const handleEndSession = async () => {
     if (requireQrToEnd) {
-      const pw = uuidv4();
-      setCurrentSessionPassword(pw);
-
-      // Determine correct column name based on class type
-      const isTutorial = selectedClass.type === "Tutorial";
-
-      const insertData = {
-        latitude: currentLocation?.lat,
-        longitude: currentLocation?.lng,
-        attendance_password: pw,
-        course_lecture_id: null,
-        course_tutorial_id: null,
-      };
-
-      if (isTutorial) {
-        insertData.course_tutorial_id = selectedClass.id;
-      } else {
-        insertData.course_lecture_id = selectedClass.id;
-      }
-
-      const { data: endSessionData, error: endSessionError } = await supabase
-        .from("attendance_session")
-        .insert([insertData])
-        .select()
-        .single();
-
-      if (endSessionError) {
-        console.error("Failed to create end session:", endSessionError);
-        alert("Failed to end session. Please try again.");
-        return;
-      }
-
-      setCurrentAttendanceId(endSessionData.id);
+      // Just open the QR dialog with "end" type - don't create a new session
+      // The existing currentAttendanceId already contains the start session
       setSessionType("end");
       setQrDialogOpen(true);
     } else {
@@ -1514,54 +1651,16 @@ const handleChooseMode = async (mode) => {
     setQrDialogOpen(false)
     localStorage.removeItem("attendanceSession");
 
-    // Send emails to absent students
-    if (todayAttendanceData.absent && todayAttendanceData.absent.length > 0) {
-      try {
-        // Get email settings for the lecturer
-        const emailSettings = await getEmailSettings(user.id);
-        
-        // Send absence notification emails
-        const emailResult = await sendAbsenceNotificationEmails(
-          todayAttendanceData.absent,
-          selectedClass,
-          emailSettings.emailTemplate,
-            user.id,
-            currentAttendanceId
-        );
-
-        if (emailResult.success) {
-          setSnackbar({
-            open: true,
-            message: `Attendance session finalized. ${emailResult.message}`,
-            severity: "success",
-          });
-        } else {
-          setSnackbar({
-            open: true,
-            message: "Attendance finalized, but failed to send some emails.",
-            severity: "warning",
-          });
-        }
-      } catch (error) {
-        console.error("Error sending absence emails:", error);
-        setSnackbar({
-          open: true,
-          message: "Attendance finalized, but email sending failed. Please check the email settings.",
-          severity: "warning",
-        });
-      }
-    } else {
-      setSnackbar({
-        open: true,
-        message: "Attendance session finalized. All attendance records have been saved to the database.",
-        severity: "success",
-      });
-    }
-
     // Refresh attendance data to update UI
     await checkTodayAttendance();
     await fetchTodayAttendanceData();
   }
+
+  // Handle QR dialog close - just close the dialog, keep session active
+  const handleQrDialogClose = () => {
+    setQrDialogOpen(false);
+    // Don't change sessionActive - the session is still running
+  };
 
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
@@ -1671,6 +1770,11 @@ const handleChooseMode = async (mode) => {
       // Refresh the attendance data
       await fetchTodayAttendanceData(currentAttendanceId);
 
+      // Dispatch event for real-time updates in StudentAttendanceList
+      window.dispatchEvent(new CustomEvent('attendance-updated', { 
+        detail: { sessionId: currentAttendanceId, studentId } 
+      }));
+
       setSnackbar({
         open: true,
         message: `${student.name || 'Student'} has been manually marked as present (manual).`,
@@ -1705,7 +1809,8 @@ const handleChooseMode = async (mode) => {
         users (
           id,
           name,
-          email
+          email,
+          matric_number
         )
       `)
       .eq(enrollmentField, selectedClass.id);
@@ -1748,7 +1853,7 @@ const handleChooseMode = async (mode) => {
       const student = enrollment.users;
       const row = [
         student.name,
-        enrollment.student_id,
+        student.matric_number,
         student.email
       ];
 
@@ -1758,7 +1863,7 @@ const handleChooseMode = async (mode) => {
 
       if (attendanceRecord) {
         row.push(attendanceRecord.status.charAt(0).toUpperCase() + attendanceRecord.status.slice(1));
-        row.push(new Date(attendanceRecord.created_at).toLocaleString());
+        row.push(attendanceRecord.created_at); // Use raw datetime directly
       } else {
         row.push('Absent');
         row.push('-');
@@ -1821,11 +1926,73 @@ const handleChooseMode = async (mode) => {
     return data.display_name || `${lat}, ${lng}`;
   }
 
-  const filteredClasses = classes.filter(
-    (cls) =>
-      cls.course_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      cls.course_code?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Helper function to check if a class is archived
+  const isClassArchivedFunc = (cls) => {
+    const endDate = cls.type === "Lecture" ? cls.lecture_end_date : cls.tutorial_end_date;
+    if (!endDate) return false;
+    const classEndDate = new Date(endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return classEndDate < today;
+  };
+
+  // Helper function to check if a class is currently active
+  const isClassCurrentlyActive = (cls) => {
+    const now = new Date();
+    const currentDay = now.getDay();
+    const currentTime = now.toTimeString().slice(0, 5);
+
+    const classDay = cls.day_of_week;
+    const startTime = cls.startTime;
+    const endTime = cls.endTime;
+
+    if (!startTime || !endTime) return false;
+
+    // Convert class day to JS day format if needed
+    let expectedJsDay = typeof classDay === 'number' ? classDay : 
+                       classDay === 'Monday' ? 1 : classDay === 'Tuesday' ? 2 :
+                       classDay === 'Wednesday' ? 3 : classDay === 'Thursday' ? 4 :
+                       classDay === 'Friday' ? 5 : classDay === 'Saturday' ? 6 : 0;
+
+    // Check if today is the correct day and time is within class time
+    return currentDay === expectedJsDay && currentTime >= startTime.slice(0, 5) && currentTime <= endTime.slice(0, 5);
+  };
+
+  const filteredClasses = classes
+    .filter(
+      (cls) =>
+        cls.course_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        cls.course_code?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => {
+      // First, check if archived - archived classes go to bottom
+      const aArchived = isClassArchivedFunc(a);
+      const bArchived = isClassArchivedFunc(b);
+      
+      if (aArchived !== bArchived) {
+        return aArchived ? 1 : -1;
+      }
+      
+      // Second, prioritize active classes (happening now)
+      const aIsActive = isClassCurrentlyActive(a);
+      const bIsActive = isClassCurrentlyActive(b);
+      
+      if (aIsActive && !bIsActive) return -1;
+      if (!aIsActive && bIsActive) return 1;
+      
+      // If both active or both inactive, sort by day then time
+      const aDayNum = typeof a.day_of_week === 'number' ? a.day_of_week : 0;
+      const bDayNum = typeof b.day_of_week === 'number' ? b.day_of_week : 0;
+      
+      if (aDayNum !== bDayNum) {
+        return aDayNum - bDayNum;
+      }
+      
+      // If same day, sort by time
+      const aTime = a.startTime || '';
+      const bTime = b.startTime || '';
+      return aTime.localeCompare(bTime);
+    });
 
   useEffect(() => {
     if (sessionActive && sessionStartTime && selectedClass) {
@@ -1861,7 +2028,11 @@ const handleChooseMode = async (mode) => {
           <Sidebar />
         </div>
 
-        <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
+        <main
+          data-has-sidebar
+          className="p-[40px] max-h-screen overflow-y-auto"
+          style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
+        >
           <div>
             <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
               Attendance Management
@@ -1871,12 +2042,7 @@ const handleChooseMode = async (mode) => {
             </p>
           </div>
 
-          <div className="flex items-center justify-center" style={{ height: "60vh" }}>
-            <div className="flex flex-col items-center gap-2">
-              <AutorenewIcon className="h-8 w-8 animate-spin text-muted-foreground" />
-              <Typography color="text.secondary">Loading class data...</Typography>
-            </div>
-          </div>
+          <Loading message="Loading class data..." fullScreen />
         </main>
       </div>
     );
@@ -1889,7 +2055,11 @@ const handleChooseMode = async (mode) => {
           <Sidebar />
         </div>
 
-        <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
+        <main
+          data-has-sidebar
+          className="p-[40px] max-h-screen overflow-y-auto"
+          style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
+        >
           <div>
             <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
               Attendance Management
@@ -1955,8 +2125,9 @@ const handleChooseMode = async (mode) => {
       </div>
 
       <main
-        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
-        style={{ minHeight: "100vh" }}
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
       >
         <div>
           <h2
@@ -1976,26 +2147,15 @@ const handleChooseMode = async (mode) => {
               <Button
                 size="small"
                 onClick={handleStartSession}
-                disabled={sessionActive || isLoading || !canStartAttendance || todayAttendanceStatus === 'taken'}
+                disabled={sessionActive || isLoading || todayAttendanceStatus === 'taken'}
                 className="gap-2 "
               >
                 <QrCodeIcon className="h-4 w-4" />
                 {todayAttendanceStatus === 'taken' ? 'Attendance Taken' : 
-                canStartAttendance ? 'Start Attendance' : 'Cannot Start'}
+                !canStartAttendance ? 'Cannot Start' : 'Start Attendance'}
               </Button>
               
-              {sessionActive && requireQrToEnd && (
-                <Button
-                  size="small"
-                  onClick={handleEndSession}
-                  disabled={isLoading}
-                  variant="outline"
-                  className="gap-2"
-                >
-                  <QrCodeIcon className="h-4 w-4" />
-                  End Attendance
-                </Button>
-              )}
+
 
               <Button
                 size="small"
@@ -2202,7 +2362,7 @@ const handleChooseMode = async (mode) => {
 
         <AttendanceSession
           open={qrDialogOpen}
-          onClose={setQrDialogOpen}
+          onClose={handleQrDialogClose}
           sessionType={sessionType}
           classData={selectedClass}
           location={currentLocation}
@@ -2216,11 +2376,13 @@ const handleChooseMode = async (mode) => {
           isActive={sessionActive}
         />
 
-        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          <MuiAlert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
-            {snackbar.message}
-          </MuiAlert>
-        </Snackbar>
+        <Toast
+          open={snackbar.open}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          message={snackbar.message}
+          severity={snackbar.severity}
+          autoHideDuration={4000}
+        />
 
         <ChooseModeDialog
           open={chooseModeDialogOpen}

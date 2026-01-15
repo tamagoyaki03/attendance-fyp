@@ -94,70 +94,43 @@ export default function TopAbsenceReasons({ timeRange = "30days" }) {
     const fetchAbsenceReasons = async () => {
       setLoading(true);
       try {
-        // Fetch MC submissions - ALL records (not just approved) to see submitted reasons
+        // Fetch MC submissions with reasons
         const { data: mcData, error: mcError } = await supabase
           .from("mc_submissions")
-          .select("id, reason, status, created_at");
+          .select("id, reason, created_at");
 
-        // Fetch leave requests - ALL records to see all absence reasons
+        // Fetch leave requests with reasons
         const { data: leaveData, error: leaveError } = await supabase
           .from("leave_requests")
-          .select("id, reason, status, created_at");
-
-        console.log("=== ABSENCE REASONS DEBUG ===");
-        console.log("MC Query Error:", mcError);
-        console.log("Leave Query Error:", leaveError);
-        console.log("MC Data fetched:", mcData?.length || 0, "records");
-        console.log("MC Data details:", mcData);
-        console.log("Leave Data fetched:", leaveData?.length || 0, "records");
-        console.log("Leave Data details:", leaveData);
+          .select("id, reason, created_at");
 
         if (mcError) {
-          console.error("MC Error - might be RLS policy blocking admin access:", mcError);
+          console.error("MC Error:", mcError);
         }
         if (leaveError) {
-          console.error("Leave Error - might be RLS policy blocking admin access:", leaveError);
+          console.error("Leave Error:", leaveError);
         }
 
-        // Count reasons - use default categories
-        const reasonCounts = {
-          "Medical Issue": 0,
-          "Family Emergency": 0,
-          "Academic": 0,
-          "Religious": 0,
-          "Personal Leave": 0,
-          "Other": 0,
-        };
-        // Count all MCs (regardless of status) - all normalized to Medical Issue
-        const allMCs = (mcData || []);
-        console.log("All MCs (any status):", allMCs.length);
-        console.log("MC Statuses:", allMCs.map(mc => mc.status));
-        reasonCounts["Medical Issue"] = allMCs.length;
-
-        // Count all leaves by normalized reason
-        const allLeaves = (leaveData || []);
-        console.log("All Leave Requests (any status):", allLeaves.length);
-        console.log("Leave Statuses:", allLeaves.map(leave => leave.status));
+        // Collect all reasons from both MC submissions and leave requests
+        const reasonCounts = {};
         
-        allLeaves.forEach((leave) => {
-          const normalizedReason = normalizeReason(leave.reason);
-          if (reasonCounts[normalizedReason] !== undefined) {
-            reasonCounts[normalizedReason] += 1;
-          } else {
-            reasonCounts[normalizedReason] = 1;
-          }
+        // Count MC submission reasons
+        (mcData || []).forEach((mc) => {
+          const reason = normalizeReason(mc.reason);
+          reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
         });
 
-        console.log("Reason Counts (all statuses):", reasonCounts);
+        // Count leave request reasons
+        (leaveData || []).forEach((leave) => {
+          const reason = normalizeReason(leave.reason);
+          reasonCounts[reason] = (reasonCounts[reason] || 0) + 1;
+        });
 
         // Convert to array and sort by count
         const reasonArray = Object.entries(reasonCounts)
           .map(([name, count]) => ({ name, value: count }))
-          .filter((r) => r.value > 0)
           .sort((a, b) => b.value - a.value)
           .slice(0, 5); // Top 5
-
-        console.log("Reason Array:", reasonArray);
 
         // Calculate percentages
         const total = reasonArray.reduce((sum, r) => sum + r.value, 0);
@@ -168,9 +141,6 @@ export default function TopAbsenceReasons({ timeRange = "30days" }) {
           color: COLORS[idx] || "#9ca3af",
         }));
 
-        console.log("Final Absence Data:", absenceDataWithColors);
-        console.log("=== END DEBUG ===");
-        
         setAbsenceData(absenceDataWithColors);
       } catch (error) {
         console.error("Error fetching absence reasons:", error);

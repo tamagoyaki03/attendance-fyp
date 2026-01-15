@@ -48,8 +48,7 @@ export default function FraudDetectionChart({ timeRange = "30days" }) {
         const { data, error } = await supabase
           .from('fraud_detection_alerts')
           .select('created_at')
-          .gte('created_at', format(startDate, 'yyyy-MM-dd'))
-          .lte('created_at', format(today, 'yyyy-MM-dd'));
+          .gte('created_at', format(startDate, 'yyyy-MM-dd'));
         if (error) {
           throw error;
         }

@@ -102,9 +102,10 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
         totalStudents: 0,
         presentCount: 0,
         absentCount: 0,
-        lateCount: 0,
+        flaggedCount: 0,
         attendanceRate: 0,
         totalSessions: 0,
+        totalOverallSessions: 0,
         students: []
       };
     }
@@ -116,28 +117,42 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
         totalStudents: 0,
         presentCount: 0,
         absentCount: 0,
-        lateCount: 0,
+        flaggedCount: 0,
         attendanceRate: 0,
         totalSessions: 0,
+        totalOverallSessions: 0,
         students: []
       };
     }
 
-    // Get all attendance sessions for this class
-    const { data: sessions, error: sessionsError } = await supabase
+    // Get current week start and end dates
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - dayOfWeek);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+
+    // Get all attendance sessions for this class for THIS WEEK ONLY
+    const { data: weekSessions, error: weekSessionsError } = await supabase
       .from("attendance_session")
       .select("id")
-      .eq(sessionField, classId);
+      .eq(sessionField, classId)
+      .gte("created_at", weekStart.toISOString())
+      .lte("created_at", weekEnd.toISOString());
 
-    if (sessionsError) {
-      console.error("Error fetching sessions:", sessionsError);
+    if (weekSessionsError) {
+      console.error("Error fetching week sessions:", weekSessionsError);
       return {
         totalStudents,
         presentCount: 0,
         absentCount: 0,
-        lateCount: 0,
+        flaggedCount: 0,
         attendanceRate: 0,
         totalSessions: 0,
+        totalOverallSessions: 0,
         students: enrollments.map(e => ({
           name: e.users?.name || "Unknown",
           email: e.users?.email || "",
@@ -146,67 +161,69 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
       };
     }
 
-    const totalSessions = sessions?.length || 0;
+    const totalWeekSessions = weekSessions?.length || 0;
 
-    if (totalSessions === 0) {
-      // No sessions yet, return all students as absent
-      const students = enrollments.map(e => ({
-        id: e.student_id,
-        name: e.users?.name || "Unknown",
-        email: e.users?.email || "",
-        status: "absent"
-      }));
+    // Get ALL attendance sessions for overall rate calculation
+    const { data: allSessions, error: allSessionsError } = await supabase
+      .from("attendance_session")
+      .select("id")
+      .eq(sessionField, classId);
 
-      return {
-        totalStudents,
-        presentCount: 0,
-        absentCount: totalStudents,
-        lateCount: 0,
-        attendanceRate: 0,
-        totalSessions: 0,
-        totalRecords: 0,
-        students
-      };
+    if (allSessionsError) {
+      console.error("Error fetching all sessions:", allSessionsError);
     }
 
-    // Get all attendance records for these sessions
-    const sessionIds = sessions.map(s => s.id);
-    const { data: attendanceRecords, error: attendanceError } = await supabase
-      .from("attendance_record")
-      .select(`id, ${enrollmentIdField}, status, session_id`)
-      .in("session_id", sessionIds);
+    const totalOverallSessions = allSessions?.length || 0;
 
-    if (attendanceError) {
-      console.error("Error fetching attendance:", attendanceError);
-      return {
-        totalStudents,
-        presentCount: 0,
-        absentCount: totalStudents,
-        lateCount: 0,
-        attendanceRate: 0,
-        totalSessions,
-        students: enrollments.map(e => ({
-          name: e.users?.name || "Unknown",
-          email: e.users?.email || "",
-          status: "absent"
-        }))
-      };
+    // Get attendance records for THIS WEEK ONLY
+    let presentCount = 0;
+    let absentCount = 0;
+    let flaggedCount = 0;
+    let weekAttendanceRecords = [];
+
+    if (totalWeekSessions > 0) {
+      const weekSessionIds = weekSessions.map(s => s.id);
+      const { data: attendanceRecords, error: attendanceError } = await supabase
+        .from("attendance_record")
+        .select(`id, ${enrollmentIdField}, status, session_id, flag_reason`)
+        .in("session_id", weekSessionIds);
+
+      if (attendanceError) {
+        console.error("Error fetching week attendance:", attendanceError);
+      } else {
+        weekAttendanceRecords = attendanceRecords || [];
+        presentCount = weekAttendanceRecords.filter(r => r.status === 'present').length || 0;
+        absentCount = weekAttendanceRecords.filter(r => r.status === 'absent').length || 0;
+        flaggedCount = weekAttendanceRecords.filter(r => r.flag_reason).length || 0;
+      }
     }
 
-    // Count statuses
-    const presentCount = attendanceRecords?.filter(r => r.status === 'present').length || 0;
-    const absentCount = attendanceRecords?.filter(r => r.status === 'absent').length || 0;
-    const lateCount = attendanceRecords?.filter(r => r.status === 'late').length || 0;
+    // Get ALL attendance records for overall attendance rate
+    let overallAttendanceRecords = [];
+    if (totalOverallSessions > 0) {
+      const allSessionIds = allSessions.map(s => s.id);
+      const { data: allAttendanceRecords, error: allAttendanceError } = await supabase
+        .from("attendance_record")
+        .select(`status`)
+        .in("session_id", allSessionIds);
 
-    // Calculate attendance rate
-    const totalPossibleAttendance = totalStudents * totalSessions;
+      if (allAttendanceError) {
+        console.error("Error fetching all attendance:", allAttendanceError);
+      } else {
+        overallAttendanceRecords = allAttendanceRecords || [];
+      }
+    }
+
+    // Calculate OVERALL attendance rate: (total present across all sessions) / (total sessions * total students)
+    const totalPresentAllTime = overallAttendanceRecords.filter(r => r.status === 'present').length || 0;
+    const totalPossibleAttendance = totalStudents * totalOverallSessions;
     const attendanceRate = totalPossibleAttendance > 0
-      ? Math.round(((presentCount / totalPossibleAttendance) * 100) * 100) / 100
+      ? Math.round(((totalPresentAllTime / totalPossibleAttendance) * 100) * 100) / 100
       : 0;
 
-    // Map students with their latest attendance status
+    // Map students with their latest attendance status from THIS WEEK
     const students = enrollments.map(enrollment => {
-      const latestRecord = attendanceRecords?.find(r => r[enrollmentIdField] === enrollment.id);
+      const latestRecord = weekAttendanceRecords.find(r => r[enrollmentIdField] === enrollment.id);
       return {
         id: enrollment.student_id,
         name: enrollment.users?.name || "Unknown",
@@ -219,10 +236,11 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
       totalStudents,
       presentCount,
       absentCount,
-      lateCount,
+      flaggedCount,
       attendanceRate,
-      totalSessions,
-      totalRecords: attendanceRecords?.length || 0,
+      totalSessions: totalWeekSessions,
+      totalOverallSessions,
+      totalRecords: weekAttendanceRecords?.length || 0,
       students
     };
 
@@ -232,9 +250,10 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
       totalStudents: 0,
       presentCount: 0,
       absentCount: 0,
-      lateCount: 0,
+      flaggedCount: 0,
       attendanceRate: 0,
       totalSessions: 0,
+      totalOverallSessions: 0,
       students: []
     };
   }

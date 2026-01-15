@@ -33,6 +33,34 @@ export default function ClassAttendance({ classes }) {
   const [classesData, setClassesData] = useState([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
+  const getDayName = (dayNumber) => {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    return days[dayNumber] || "";
+  };
+
+  const formatTime = (time) => {
+    if (!time) return "";
+    return time.substring(0, 5);
+  };
+
+  const isClassActive = (cls) => {
+    const endDate = cls.lecture_end_date || cls.tutorial_end_date;
+    if (!endDate) return true;
+    const classEndDate = new Date(endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return classEndDate >= today;
+  };
+
+  const isClassStartedThisWeek = (classSchedule) => {
+    const now = new Date();
+    const currentDay = now.getDay();
+    const classDay = classSchedule.day_of_week;
+    
+    // If class is today or has already passed this week
+    return currentDay >= classDay;
+  };
+
   // Load initial class data with real attendance rates
   useEffect(() => {
     const loadClassData = async () => {
@@ -50,13 +78,29 @@ export default function ClassAttendance({ classes }) {
               lecture.type || "Lecture"
             );
 
+            // Get correct time fields based on class type
+            const startTime = lecture.type === "Tutorial" 
+              ? formatTime(lecture.tutorial_start_time)
+              : formatTime(lecture.lecture_start_time);
+            const endTime = lecture.type === "Tutorial"
+              ? formatTime(lecture.tutorial_end_time)
+              : formatTime(lecture.lecture_end_time);
+            const dayName = getDayName(lecture.day_of_week);
+            const timeDisplay = startTime && endTime ? `${startTime} - ${endTime}` : "";
+            const scheduleDisplay = dayName && timeDisplay ? `${dayName}, ${timeDisplay}` : dayName || timeDisplay || "";
+
+            // Get correct location field based on class type
+            const location = lecture.type === "Tutorial" 
+              ? lecture.tutorial_location 
+              : lecture.lecture_location;
+
             return {
               id: lecture.id,
               code: lecture.course_code,
               name: lecture.course_title,
               lecturer: lecture.users?.name || "N/A",
-              time: `${lecture.lecture_start_time} - ${lecture.lecture_end_time}`,
-              location: lecture.lecture_location,
+              time: scheduleDisplay,
+              location: location,
               totalStudents: attendanceRate.totalStudents,
               totalSessions: attendanceRate.totalSessions,
               attendanceRate: Math.round(attendanceRate.attendanceRate * 10) / 10,
@@ -124,9 +168,13 @@ export default function ClassAttendance({ classes }) {
     );
   }
 
+  // Separate active and archived classes
+  const activeClasses = classesData.filter(item => isClassActive(classes.find(c => c.id === item.id)));
+  const archivedClasses = classesData.filter(item => !isClassActive(classes.find(c => c.id === item.id)));
+
   return (
     <Box display="flex" flexDirection="column" gap={2}>
-      {classesData.map((item) => {
+      {activeClasses.map((item) => {
         const attendanceDetails = attendanceData[item.id];
         const isLoading = loadingStates[item.id];
         const isExpanded = expanded?.id === item?.id;
@@ -159,9 +207,22 @@ export default function ClassAttendance({ classes }) {
               title={
                 <Box display="flex" justifyContent="space-between" alignItems="center">
                   <Box>
-                    <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
-                      {item.code}: {item.name}
-                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                      <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
+                        {item.code}: {item.name}
+                      </Typography>
+                      <Chip 
+                        label={item.type} 
+                        size="small" 
+                        sx={{ 
+                          height: "20px",
+                          fontSize: "0.7rem",
+                          backgroundColor: item.type === "Lecture" ? "#dbeafe" : "#fce7f3",
+                          color: item.type === "Lecture" ? "#0c4a6e" : "#831843",
+                          fontWeight: 600,
+                        }}
+                      />
+                    </Box>
                     <Typography variant="caption" color="text.secondary">
                       {item.lecturer} • {item.time}
                     </Typography>
@@ -196,6 +257,18 @@ export default function ClassAttendance({ classes }) {
                   </Box>
                 ) : attendanceDetails ? (
                   <Box>
+                    {/* Week Header */}
+                    <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 2, color: "#0f172a" }}>
+                      This Week's Statistics
+                    </Typography>
+
+                    {/* Check if class has started this week */}
+                    {!isClassStartedThisWeek(item) ? (
+                      <Alert severity="info" sx={{ mb: 3 }}>
+                        This class has not started yet this week.
+                      </Alert>
+                    ) : null}
+
                     {/* Overview Stats */}
                     <Box
                       display="grid"
@@ -230,10 +303,10 @@ export default function ClassAttendance({ classes }) {
 
                       <Box sx={{ p: 2, backgroundColor: "#fffbeb", borderRadius: 1 }}>
                         <Typography variant="caption" color="text.secondary">
-                          Late
+                          Flagged
                         </Typography>
                         <Typography variant="h6" fontWeight="bold" sx={{ color: "#f59e0b" }}>
-                          {attendanceDetails.lateCount}
+                          {attendanceDetails.flaggedCount || 0}
                         </Typography>
                       </Box>
 
@@ -293,7 +366,7 @@ export default function ClassAttendance({ classes }) {
                       <Typography variant="body2" color="text.secondary">
                         Total Sessions Held
                       </Typography>
-                      <Chip label={attendanceDetails.totalSessions} />
+                      <Chip label={attendanceDetails.totalOverallSessions} />
                     </Box>
                   </Box>
                 ) : (
@@ -306,6 +379,50 @@ export default function ClassAttendance({ classes }) {
           </Card>
         );
       })}
+
+      {archivedClasses.length > 0 && (
+        <Box mt={3}>
+          <Typography variant="h6" fontWeight="bold" mb={2} color="text.secondary">
+            Archived Classes
+          </Typography>
+          {archivedClasses.map((item) => (
+            <Card
+              className="border"
+              key={item.id}
+              sx={{
+                background: "#ffffff",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 6px 18px rgba(15,23,42,0.04)",
+                borderRadius: 1,
+                opacity: 0.6,
+                mb: 2,
+              }}
+            >
+              <CardHeader
+                sx={{
+                  px: 3,
+                  py: 2,
+                }}
+                title={
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Box>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
+                          {item.code}: {item.name}
+                        </Typography>
+                        <Chip label="Archived" size="small" variant="outlined" sx={{ borderColor: "#fecaca", color: "#991b1b" }} />
+                      </Box>
+                      <Typography variant="caption" color="text.secondary">
+                        {item.lecturer} • {item.time}
+                      </Typography>
+                    </Box>
+                  </Box>
+                }
+              />
+            </Card>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }

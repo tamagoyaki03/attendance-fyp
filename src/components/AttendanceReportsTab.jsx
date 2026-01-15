@@ -15,6 +15,7 @@ import {
   Box,
   CircularProgress,
   Alert,
+  Chip,
 } from "@mui/material";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
@@ -47,8 +48,8 @@ export default function AttendanceReportsTab() {
         const toDateStr = format(toDate, "yyyy-MM-dd");
 
         // Fetch classes: all if admin, only lecturer's if lecturer
-        let lectureQuery = supabase.from("course_lecture").select("id, course_code, course_title");
-        let tutorialQuery = supabase.from("course_tutorial").select("id, course_code, course_title");
+        let lectureQuery = supabase.from("course_lecture").select("id, course_code, course_title, lecture_end_date");
+        let tutorialQuery = supabase.from("course_tutorial").select("id, course_code, course_title, tutorial_end_date");
         
         if (user.role !== "admin") {
           lectureQuery = lectureQuery.eq("lecturer_id", user.id);
@@ -61,9 +62,28 @@ export default function AttendanceReportsTab() {
         if (tutorialRes.error) throw tutorialRes.error;
 
         const courseItems = [
-          ...(lectureRes.data || []).map((c) => ({ ...c, classType: "Lecture" })),
-          ...(tutorialRes.data || []).map((c) => ({ ...c, classType: "Tutorial" })),
+          ...(lectureRes.data || []).map((c) => ({ ...c, classType: "Lecture", endDate: c.lecture_end_date })),
+          ...(tutorialRes.data || []).map((c) => ({ ...c, classType: "Tutorial", endDate: c.tutorial_end_date })),
         ];
+
+        // Sort by class code: letters first, then numbers
+        courseItems.sort((a, b) => {
+          const codeA = a.course_code || "";
+          const codeB = b.course_code || "";
+          
+          // Extract letters and numbers
+          const lettersA = codeA.replace(/[0-9]/g, "");
+          const lettersB = codeB.replace(/[0-9]/g, "");
+          const numbersA = parseInt(codeA.replace(/[^0-9]/g, "")) || 0;
+          const numbersB = parseInt(codeB.replace(/[^0-9]/g, "")) || 0;
+          
+          // Compare letters first
+          if (lettersA !== lettersB) {
+            return lettersA.localeCompare(lettersB);
+          }
+          // If letters are same, compare numbers
+          return numbersA - numbersB;
+        });
 
         const summaries = await Promise.all(
           courseItems.map(async (course) => {
@@ -83,7 +103,8 @@ export default function AttendanceReportsTab() {
               .order("created_at", { ascending: false });
 
             const sessionsInRangeCount = (sessionsInRange || []).length;
-            const sessionIds = (sessionsInRange || []).map((s) => s.id);
+            const lastSessionId = sessionsInRange?.[0]?.id || null;
+            const lastSessionDate = sessionsInRange?.[0]?.date || sessionsInRange?.[0]?.created_at || null;
 
             // Enrolled students count
             const { data: enrollments } = await supabase
@@ -92,30 +113,40 @@ export default function AttendanceReportsTab() {
               .eq(courseIdField, course.id);
             const totalStudents = (enrollments || []).length;
 
-            // Attendance records in this range
-            let presentCount = 0;
-            if (sessionIds.length > 0) {
-              const { data: recordsInRange } = await supabase
+            // Get students who attended last session
+            let lastSessionAttendedCount = 0;
+            let lastSessionAttendancePercentage = 0;
+            if (lastSessionId) {
+              const { data: lastSessionRecords } = await supabase
                 .from("attendance_record")
                 .select("status")
-                .in("session_id", sessionIds);
-              presentCount = (recordsInRange || []).filter((r) => r.status === "present").length;
+                .eq("session_id", lastSessionId);
+              lastSessionAttendedCount = (lastSessionRecords || []).filter((r) => r.status === "present").length;
+              lastSessionAttendancePercentage = totalStudents > 0 
+                ? Math.round((lastSessionAttendedCount / totalStudents) * 100) 
+                : 0;
             }
-
-            const totalPossible = totalStudents * sessionsInRangeCount;
-            const attendancePercentage = totalPossible > 0 ? Math.round((presentCount / totalPossible) * 100) : 0;
-            const lastSessionDate = sessionsInRange?.[0]?.date || sessionsInRange?.[0]?.created_at || null;
 
             return {
               class: course.course_code || course.course_title,
               totalSessions: sessionsInRangeCount,
-              // Average attended sessions per student in range
-              attended: totalStudents > 0 ? Math.round(presentCount / totalStudents) : 0,
-              percentage: `${attendancePercentage}%`,
+              // Students who attended last session
+              lastSessionAttended: lastSessionAttendedCount,
+              lastSessionPercentage: `${lastSessionAttendancePercentage}%`,
               lastSession: lastSessionDate ? format(new Date(lastSessionDate), "PPP") : "-",
+              isArchived: course.endDate ? new Date(course.endDate) < new Date() : false,
             };
           })
         );
+
+        // Sort: active classes first, then archived at bottom
+        summaries.sort((a, b) => {
+          if (a.isArchived !== b.isArchived) {
+            return a.isArchived ? 1 : -1;
+          }
+          // Secondary sort by class name
+          return (a.class || '').localeCompare(b.class || '');
+        });
 
         setRows(summaries);
       } catch (err) {
@@ -160,10 +191,10 @@ export default function AttendanceReportsTab() {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell><strong>Class Name</strong></TableCell>
+                  <TableCell><strong>Class Code</strong></TableCell>
                   <TableCell>Total Sessions</TableCell>
-                  <TableCell>Attended Sessions</TableCell>
-                  <TableCell>Attendance %</TableCell>
+                  <TableCell>Students attended Last Session</TableCell>
+                  <TableCell>Last Session Attendance %</TableCell>
                   <TableCell>Last Session</TableCell>
                 </TableRow>
               </TableHead>
@@ -187,15 +218,25 @@ export default function AttendanceReportsTab() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((row, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>{row.class}</TableCell>
-                      <TableCell>{row.totalSessions}</TableCell>
-                      <TableCell>{row.attended}</TableCell>
-                      <TableCell>{row.percentage}</TableCell>
-                      <TableCell>{row.lastSession}</TableCell>
-                    </TableRow>
-                  ))
+                  rows.map((row, idx) => {
+                    const isArchived = row.isArchived;
+                    return (
+                      <TableRow key={idx} sx={{ opacity: isArchived ? 0.6 : 1, backgroundColor: isArchived ? "#f9fafb" : "transparent" }}>
+                        <TableCell>
+                          <Box display="flex" alignItems="center" gap={1}>
+                            <Typography>{row.class}</Typography>
+                            {isArchived && (
+                              <Chip label="Archived" size="small" sx={{ backgroundColor: "#fecaca", color: "#991b1b", fontWeight: 600 }} />
+                            )}
+                          </Box>
+                        </TableCell>
+                        <TableCell>{row.totalSessions}</TableCell>
+                        <TableCell>{row.lastSessionAttended}</TableCell>
+                        <TableCell>{row.lastSessionPercentage}</TableCell>
+                        <TableCell>{row.lastSession}</TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

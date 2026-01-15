@@ -30,17 +30,29 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [enrolledStudents, setEnrolledStudents] = useState([]);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Show warning if sessionId is missing
   const showSessionIdWarning = !sessionId;
 
+  // Listen for attendance updates
+  React.useEffect(() => {
+    const handleAttendanceUpdate = () => {
+      console.log('Attendance updated - refreshing list');
+      setRefreshTrigger(prev => prev + 1);
+    };
+    window.addEventListener('attendance-updated', handleAttendanceUpdate);
+    return () => window.removeEventListener('attendance-updated', handleAttendanceUpdate);
+  }, []);
+
   // Fetch all enrolled students and their attendance_record on mount or when classData changes
   React.useEffect(() => {
     async function fetchEnrolledAndAttendance() {
-      if (!classData || !classData.id || !classData.type || !sessionId) {
-        console.log('Missing classData or sessionId', { classData, sessionId });
+      if (!classData || !classData.id || !classData.type) {
+        console.log('Missing classData', { classData });
         return;
       }
+      
       const enrollmentTable = classData.type === "Tutorial" ? "enrollment_tutorial" : "enrollment_lecture";
       const enrollmentField = classData.type === "Tutorial" ? "tutorial_id" : "course_id";
       const attendanceField = classData.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
@@ -53,17 +65,69 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
       console.log('Enrollments:', enrollments, 'Error:', enrollError);
       if (enrollError || !enrollments) return;
 
-      // Fetch attendance records for this session
+      // Find ALL sessions for this class this week
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const diffToMonday = (dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + diffToMonday);
+      monday.setHours(0, 0, 0, 0);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      sunday.setHours(23, 59, 59, 999);
+
+      const { data: weekSessions, error: weekSessionError } = await supabase
+        .from("attendance_session")
+        .select("id")
+        .eq(classData.type === "Tutorial" ? 'course_tutorial_id' : 'course_lecture_id', classData.id)
+        .gte('created_at', monday.toISOString())
+        .lte('created_at', sunday.toISOString());
+
+      if (weekSessionError || !weekSessions || weekSessions.length === 0) {
+        console.log('No sessions found for this week');
+        setEnrolledStudents(enrollments.map(e => ({
+          ...e.users,
+          student_id: e.student_id,
+          enrollmentId: e.id,
+          lecture_enrollment_id: classData.type === "Lecture" ? e.id : undefined,
+          tutorial_enrollment_id: classData.type === "Tutorial" ? e.id : undefined,
+          status: undefined,
+          checkInTime: undefined,
+          marked_manually: undefined,
+          attendance_id: undefined
+        })));
+        return;
+      }
+
+      // Get ALL attendance records for ALL sessions this week (not just one session)
+      const sessionIds = weekSessions.map(s => s.id);
       const { data: attendanceRecords, error: attendanceError } = await supabase
         .from('attendance_record')
-        .select(`id, status, created_at, marked_manually, ${attendanceField}`)
-        .eq('session_id', sessionId);
-      console.log('AttendanceRecords:', attendanceRecords, 'Error:', attendanceError);
-      if (attendanceError || !attendanceRecords) return;
+        .select(`id, status, created_at, marked_manually, ${attendanceField}, session_id, flag_reason`)
+        .in('session_id', sessionIds);
+      
+      console.log('=== ATTENDANCE DEBUG ===');
+      console.log('All Week SessionIds:', sessionIds);
+      console.log('AttendanceField:', attendanceField);
+      console.log('AttendanceRecords found:', attendanceRecords?.length || 0);
+      console.log('AttendanceRecords:', JSON.stringify(attendanceRecords, null, 2));
+      console.log('AttendanceError:', attendanceError);
+      if (attendanceError) {
+        console.error('Error fetching attendance:', attendanceError);
+        return;
+      }
 
       // Merge attendance info into enrolled students
       const merged = enrollments.map(e => {
-        const attn = attendanceRecords.find(r => r[attendanceField] === e.id);
+        // Find attendance record for this enrollment (from ANY session this week)
+        const attn = attendanceRecords?.find(r => r[attendanceField] === e.id);
+        console.log(`Student enrollment ID ${e.id}:`, {
+          found: !!attn,
+          attendanceFieldValue: attn ? attn[attendanceField] : 'N/A',
+          status: attn ? attn.status : 'undefined',
+          session_id: attn ? attn.session_id : 'N/A',
+          fullRecord: attn
+        });
         return {
           ...e.users,
           student_id: e.student_id,
@@ -73,26 +137,20 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
           status: attn ? attn.status : undefined,
           checkInTime: attn ? attn.created_at : undefined,
           marked_manually: attn ? attn.marked_manually : undefined,
-          attendance_id: attn ? attn.id : undefined
+          attendance_id: attn ? attn.id : undefined,
+          flag_reason: attn ? attn.flag_reason : undefined
         };
       });
-      console.log('Merged students:', merged);
+      console.log('Merged students with status:', merged.map(s => ({ name: s.name, status: s.status, enrollmentId: s.enrollmentId })));
+      console.log('=== END DEBUG ===');
       setEnrolledStudents(merged);
     }
     fetchEnrolledAndAttendance();
-  }, [classData, sessionId]);
+  }, [classData, refreshTrigger]);
 
-  // Merge attendance status from studentsState/classData into enrolledStudents
-  let mergedStudents = enrolledStudents.map(enrolled => {
-    // Try to find matching student in studentsState or classData.all
-    let match = null;
-    if (studentsState && Array.isArray(studentsState)) {
-      match = studentsState.find(s => (s.student_id || s.id) === (enrolled.student_id || enrolled.id));
-    } else if (classData?.all && Array.isArray(classData.all)) {
-      match = classData.all.find(s => (s.student_id || s.id) === (enrolled.student_id || enrolled.id));
-    }
-    return match ? { ...enrolled, ...match } : enrolled;
-  });
+  // Use enrolledStudents directly - they already have the correct status from attendance_record
+  // Don't merge with classData.all as it may contain stale data that overwrites the correct status
+  let mergedStudents = enrolledStudents;
 
   // Filter by search and status
   let filteredStudents = mergedStudents.filter(student => {
@@ -242,13 +300,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
 
   return (
     <div>
-      {showSessionIdWarning && (
-        <Box mb={2}>
-          <Typography color="warning.main" variant="body2">
-            No attendance session is active or selected. Please start or select a session to view students.
-          </Typography>
-        </Box>
-      )}
       {/* Flag Reason Dialog */}
       {flagError && (
         <Box mb={2}>

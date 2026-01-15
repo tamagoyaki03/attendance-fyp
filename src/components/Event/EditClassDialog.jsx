@@ -9,17 +9,137 @@ import {
   Box, 
   Button, 
   Typography, 
-  Autocomplete, 
   Chip,
   IconButton,
   Tooltip,
   Alert,
-  CircularProgress
+  CircularProgress,
+  Autocomplete
 } from "@mui/material";
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import supabase from "../../config/supabaseClient";
 import { getCurrentLocation, geocodeAddress } from "../../utils/geolocationUtils";
+import LocationPicker from "../LocationPicker";
+import ConflictDialog from "../ConflictDialog";
+
+// Helper function to check if two time ranges overlap
+const timeRangesOverlap = (start1, end1, start2, end2) => {
+  // Convert time strings (HH:MM:SS or HH:MM) to minutes
+  const toMinutes = (time) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  
+  const start1Min = toMinutes(start1);
+  const end1Min = toMinutes(end1);
+  const start2Min = toMinutes(start2);
+  const end2Min = toMinutes(end2);
+  
+  // Check if ranges overlap
+  return start1Min < end2Min && start2Min < end1Min;
+};
+
+// Helper function to check for time conflicts
+const checkTimeConflicts = async (studentIds, dayOfWeek, startTime, endTime, isLecture, excludeClassId = null) => {
+  const conflicts = [];
+  
+  for (const studentId of studentIds) {
+    // Get all enrollments for this student
+    const [{ data: lectureEnrollments }, { data: tutorialEnrollments }] = await Promise.all([
+      supabase
+        .from('enrollment_lecture')
+        .select(`
+          id,
+          course_id,
+          course:course_lecture (
+            id,
+            course_code,
+            course_title,
+            day_of_week,
+            lecture_start_time,
+            lecture_end_time
+          )
+        `)
+        .eq('student_id', studentId),
+      supabase
+        .from('enrollment_tutorial')
+        .select(`
+          id,
+          tutorial_id,
+          tutorial:course_tutorial (
+            id,
+            course_code,
+            course_title,
+            day_of_week,
+            tutorial_start_time,
+            tutorial_end_time
+          )
+        `)
+        .eq('student_id', studentId)
+    ]);
+    
+    // Check lecture enrollments for conflicts
+    if (lectureEnrollments) {
+      for (const enrollment of lectureEnrollments) {
+        const course = enrollment.course;
+        // Skip the current class being edited
+        if (course && 
+            (!excludeClassId || (isLecture && course.id !== excludeClassId)) &&
+            course.day_of_week === dayOfWeek && 
+            course.lecture_start_time && 
+            course.lecture_end_time &&
+            timeRangesOverlap(startTime, endTime, course.lecture_start_time, course.lecture_end_time)) {
+          // Get student name
+          const { data: userData } = await supabase
+            .from('users')
+            .select('name')
+            .eq('id', studentId)
+            .single();
+          
+          conflicts.push({
+            studentId,
+            studentName: userData?.name || 'Unknown',
+            conflictingClass: `${course.course_code} - ${course.course_title}`,
+            conflictingTime: `${course.lecture_start_time.substring(0, 5)} - ${course.lecture_end_time.substring(0, 5)}`
+          });
+          break;
+        }
+      }
+    }
+    
+    // Check tutorial enrollments for conflicts (if not already found a conflict)
+    if (tutorialEnrollments && !conflicts.some(c => c.studentId === studentId)) {
+      for (const enrollment of tutorialEnrollments) {
+        const tutorial = enrollment.tutorial;
+        // Skip the current class being edited
+        if (tutorial && 
+            (!excludeClassId || (!isLecture && tutorial.id !== excludeClassId)) &&
+            tutorial.day_of_week === dayOfWeek && 
+            tutorial.tutorial_start_time && 
+            tutorial.tutorial_end_time &&
+            timeRangesOverlap(startTime, endTime, tutorial.tutorial_start_time, tutorial.tutorial_end_time)) {
+          // Get student name
+          const { data: userData } = await supabase
+            .from('users')
+            .select('name')
+            .eq('id', studentId)
+            .single();
+          
+          conflicts.push({
+            studentId,
+            studentName: userData?.name || 'Unknown',
+            conflictingClass: `${tutorial.course_code} - ${tutorial.course_title}`,
+            conflictingTime: `${tutorial.tutorial_start_time.substring(0, 5)} - ${tutorial.tutorial_end_time.substring(0, 5)}`
+          });
+          break;
+        }
+      }
+    }
+  }
+  
+  return conflicts;
+};
 
 export default function EditClassDialog({ open, onClose, classData, onClassAdded }) {
   const [formData, setFormData] = useState({
@@ -43,6 +163,11 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
   const [isLoading, setIsLoading] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
+  const [openLocationPicker, setOpenLocationPicker] = useState(false);
+  const [lecturerConflict, setLecturerConflict] = useState(null);
+  const [openLecturerConflictDialog, setOpenLecturerConflictDialog] = useState(false);
+  const [studentConflicts, setStudentConflicts] = useState([]);
+  const [openStudentConflictDialog, setOpenStudentConflictDialog] = useState(false);
 
   // Fetch lecturers and students
   useEffect(() => {
@@ -232,6 +357,19 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
     }
   };
 
+  // Alias for handleChange to maintain compatibility
+  const handleInputChange = handleChange;
+
+  const inputSx = {
+    "& .MuiOutlinedInput-root": {
+      backgroundColor: "#ffffff",
+      color: "#0f172a",
+      "& fieldset": { borderColor: "#e2e8f0" },
+      "&:hover fieldset": { borderColor: "#cbd5e1" },
+      "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+    },
+  };
+
   const handleClose = () => {
     console.log("Handle close called, onClose type:", typeof onClose);
     setLocationStatus('');
@@ -317,17 +455,13 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       }))
     ];
 
-    // Check for time overlap
+    // Check for time overlap using the same logic as student conflicts
     const newStart = formData.startTime;
     const newEnd = formData.endTime;
 
     for (const existingClass of allClasses) {
-      // Check if times overlap
-      if (
-        (newStart >= existingClass.start && newStart < existingClass.end) ||
-        (newEnd > existingClass.start && newEnd <= existingClass.end) ||
-        (newStart <= existingClass.start && newEnd >= existingClass.end)
-      ) {
+      // Check if times overlap using timeRangesOverlap function
+      if (timeRangesOverlap(newStart, newEnd, existingClass.start, existingClass.end)) {
         return existingClass;
       }
     }
@@ -337,30 +471,67 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Check if location is not online and coordinates are missing
+    if (formData.location && formData.location.toLowerCase() !== 'online' && (!formData.latitude || !formData.longitude)) {
+      alert('Please save coordinates for this location. Click the location icon to geocode or use "Get my location".');
+      return;
+    }
+    
     setIsLoading(true);
 
     // Check for lecturer scheduling conflicts
     const conflict = await checkLecturerConflict();
     if (conflict) {
-      alert(`Scheduling conflict! This lecturer is already assigned to ${conflict.type}: ${conflict.code} - ${conflict.title} on ${formData.day} from ${conflict.start} to ${conflict.end}.`);
+      setLecturerConflict(conflict);
+      setOpenLecturerConflictDialog(true);
       setIsLoading(false);
       return;
     }
 
+    // Check for student time conflicts BEFORE updating course
+    const isLecture = formData.type === "Lecture";
+    const dayNumber = {
+      "Monday": 1,
+      "Tuesday": 2,
+      "Wednesday": 3,
+      "Thursday": 4,
+      "Friday": 5,
+    }[formData.day];
+
+    // Get new students to be added (those not currently enrolled)
+    const { data: currentEnrollments } = await supabase
+      .from(isLecture ? "enrollment_lecture" : "enrollment_tutorial")
+      .select(`id, student_id`)
+      .eq(isLecture ? "course_id" : "tutorial_id", classData.id);
+    
+    const currentStudentIds = currentEnrollments?.map(e => e.student_id) || [];
+    const newStudentIds = formData.students.map(s => s.id);
+    const toAdd = newStudentIds.filter(id => !currentStudentIds.includes(id));
+
+    // Check time conflicts for newly added students
+    if (toAdd.length > 0) {
+      const conflictingStudents = await checkTimeConflicts(
+        toAdd,
+        dayNumber,
+        formData.startTime,
+        formData.endTime,
+        isLecture,
+        classData.id
+      );
+
+      if (conflictingStudents.length > 0) {
+        setStudentConflicts(conflictingStudents);
+        setOpenStudentConflictDialog(true);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     try {
-      const isLecture = formData.type === "Lecture";
       const courseTable = isLecture ? "course_lecture" : "course_tutorial";
       const enrollmentTable = isLecture ? "enrollment_lecture" : "enrollment_tutorial";
       const courseIdField = isLecture ? "course_id" : "tutorial_id";
-
-
-      const dayNumber = {
-        "Monday": 1,
-        "Tuesday": 2,
-        "Wednesday": 3,
-        "Thursday": 4,
-        "Friday": 5,
-      }[formData.day];
 
       const payload = isLecture ? {
         course_code: formData.code,
@@ -397,8 +568,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       }
 
       // --- Enrollment update logic ---
-      // 1. Fetch current enrollments
-      const { data: currentEnrollments, error: fetchEnrollError } = await supabase
+      // 1. Fetch current enrollments (already fetched before, but re-fetch to be safe)
+      const { data: currentEnrollmentsForUpdate, error: fetchEnrollError } = await supabase
         .from(enrollmentTable)
         .select(`id, student_id`)
         .eq(courseIdField, classData.id);
@@ -408,15 +579,15 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         alert("An error occurred while updating enrollments. Please try again.");
         return;
       }
-      const currentStudentIds = currentEnrollments.map(e => e.student_id);
+      const currentStudentIdsForUpdate = currentEnrollmentsForUpdate.map(e => e.student_id);
       const newStudentIds = formData.students.map(s => s.id);
 
       // 2. Calculate students to add and remove
-      const toAdd = newStudentIds.filter(id => !currentStudentIds.includes(id));
+      const toAdd = newStudentIds.filter(id => !currentStudentIdsForUpdate.includes(id));
       // If newStudentIds is empty, toRemove should be all currentEnrollments
-      const toRemove = currentEnrollments.filter(e => !newStudentIds.includes(e.student_id));
+      const toRemove = currentEnrollmentsForUpdate.filter(e => !newStudentIds.includes(e.student_id));
 
-      // 3. Only insert new enrollments
+      // 3. Insert new enrollments (already checked for conflicts before course update)
       if (toAdd.length > 0) {
         const enrollments = toAdd.map(student_id => ({
           student_id,
@@ -531,45 +702,69 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
             InputLabelProps={{ shrink: true }}
           />
 
-          <Box>
-            <TextField
-              label="Location"
-              fullWidth
-              name="location"
-              value={formData.location}
-              onChange={handleChange}
-              InputProps={{
-                endAdornment: (
-                  <Box display="flex" gap={0.5}>
-                    <Tooltip title="Get coordinates for entered location">
-                      <IconButton 
-                        onClick={handleGeocodeLocation} 
-                        disabled={isGettingLocation || !formData.location.trim() || formData.location.toLowerCase() === 'online'}
-                        size="small"
-                        color="primary"
-                      >
-                        {isGettingLocation ? <CircularProgress size={16} /> : <LocationOnIcon />}
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Use my current location">
-                      <IconButton 
-                        onClick={handleGetCurrentLocation} 
-                        disabled={isGettingLocation || formData.location.toLowerCase() === 'online'}
-                        size="small"
-                        color="secondary"
-                      >
-                        {isGettingLocation ? <CircularProgress size={16} /> : <MyLocationIcon />}
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                )
-              }}
-            />
+          <TextField 
+            id="location" 
+            name="location" 
+            placeholder="e.g., Room 101, Building A" 
+            value={formData.location} 
+            onChange={handleInputChange} 
+            fullWidth 
+            sx={inputSx}
+            label="Location"
+            InputProps={{
+              endAdornment: (
+                <Box display="flex" gap={0.5}>
+                  <Tooltip title="Get coordinates for entered location">
+                    <IconButton 
+                      onClick={handleGeocodeLocation} 
+                      disabled={isGettingLocation || !formData.location.trim() || formData.location.toLowerCase() === 'online'}
+                      size="small"
+                      color="primary"
+                    >
+                      {isGettingLocation ? <CircularProgress size={16} /> : <LocationOnIcon />}
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Use my current location">
+                    <IconButton 
+                      onClick={handleGetCurrentLocation} 
+                      disabled={isGettingLocation || formData.location.toLowerCase() === 'online'}
+                      size="small"
+                      color="secondary"
+                    >
+                      {isGettingLocation ? <CircularProgress size={16} /> : <MyLocationIcon />}
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Select location on map">
+                    <IconButton 
+                      onClick={() => setOpenLocationPicker(true)}
+                      disabled={formData.location.toLowerCase() === 'online'}
+                      size="small"
+                      color="info"
+                      sx={{ 
+                        backgroundColor: '#e3f2fd',
+                        '&:hover': { backgroundColor: '#bbdefb' }
+                      }}
+                    >
+                      📍
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              )
+            }}
+          />
+            
+            {formData.location && formData.location.toLowerCase() !== 'online' && !formData.latitude && (
+              <Box sx={{ mt: 1, p: 1, backgroundColor: '#fff3cd', borderRadius: 1, border: '1px solid #ffc107' }}>
+                <Typography variant="caption" color="error">
+                  ⚠️ Coordinates required for physical locations. Click the location icon to save coordinates.
+                </Typography>
+              </Box>
+            )}
             
             {formData.latitude && formData.longitude && formData.location.toLowerCase() !== 'online' && (
               <Box sx={{ mt: 1, p: 1, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
-                <Typography variant="caption" color="text.secondary">
-                  Coordinates: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
+                <Typography variant="caption" color="success" sx={{ fontWeight: 'bold' }}>
+                  ✓ Coordinates: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
                 </Typography>
               </Box>
             )}
@@ -581,7 +776,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
                 </Typography>
               </Box>
             )}
-          </Box>
 
           <TextField
             label="Lecturer"
@@ -642,6 +836,42 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
           {isLoading ? "Saving..." : "Save Changes"}
         </Button>
       </DialogActions>
+
+      <LocationPicker
+        open={openLocationPicker}
+        onClose={() => setOpenLocationPicker(false)}
+        onLocationSelect={(selectedLocation) => {
+          setFormData({
+            ...formData,
+            location: formData.location || selectedLocation.location,
+            latitude: selectedLocation.latitude,
+            longitude: selectedLocation.longitude
+          });
+          setLocationStatus('✓ Coordinates set from map selection');
+        }}
+        initialLocation={formData.location}
+        initialPosition={formData.latitude && formData.longitude ? { latitude: formData.latitude, longitude: formData.longitude } : null}
+      />
+
+      <ConflictDialog
+        open={openLecturerConflictDialog}
+        onClose={() => setOpenLecturerConflictDialog(false)}
+        type="lecturer"
+        conflicts={lecturerConflict}
+        day={formData.day}
+        startTime={formData.startTime}
+        endTime={formData.endTime}
+      />
+
+      <ConflictDialog
+        open={openStudentConflictDialog}
+        onClose={() => setOpenStudentConflictDialog(false)}
+        type="student"
+        conflicts={studentConflicts}
+        day={formData.day}
+        startTime={formData.startTime}
+        endTime={formData.endTime}
+      />
     </Dialog>
   );
 }

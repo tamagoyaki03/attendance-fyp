@@ -38,6 +38,7 @@ import { Search as SearchIcon } from "@mui/icons-material";
 import { format, subDays, startOfYear } from "date-fns";
 import Sidebar from "../components/Sidebar";
 import AttendanceTrends from "../components/Event/AttendanceTrends";
+import supabase from "../config/supabaseClient";
 import TopAbsenceReasons from "../components/Event/TopAbsenceReason";
 import FraudDetectionChart from "../components/Event/FraudDetectionChart";
 import { calculateAttendanceMetrics } from "../utils/analyticsUtils";
@@ -48,13 +49,14 @@ export default function AnalyticsPage() {
   const [kpiData, setKpiData] = useState({
     avgAttendanceRate: 0,
     chronicAbsenteeism: 0,
-    lateCheckIns: 0,
+    excusedRate: 0,
     fraudAttempts: 0,
     prevAttendanceRate: 0,
     prevAbsenteeism: 0,
-    prevLateCheckIns: 0,
+    prevExcusedRate: 0,
     prevFraudAttempts: 0,
   });
+  const [fraudByMethod, setFraudByMethod] = useState([]);
 
   const user = useMemo(() => {
     const cached = sessionStorage.getItem("user");
@@ -81,11 +83,14 @@ export default function AnalyticsPage() {
       default:
         startDate = subDays(today, 30);
     }
+    // Always compare to previous 30 days (month)
+    const prevStart = subDays(today, 60);
+    const prevEnd = subDays(today, 30);
     return {
       start: format(startDate, "yyyy-MM-dd"),
       end: format(today, "yyyy-MM-dd"),
-      prevStart: format(subDays(startDate, Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))), "yyyy-MM-dd"),
-      prevEnd: format(subDays(startDate, 1), "yyyy-MM-dd"),
+      prevStart: format(prevStart, "yyyy-MM-dd"),
+      prevEnd: format(prevEnd, "yyyy-MM-dd"),
     };
   };
 
@@ -110,8 +115,8 @@ export default function AnalyticsPage() {
       const chronicAbsenteeism = currentMetrics.totalPossible > 0 
         ? Math.round((currentMetrics.absentCount / currentMetrics.totalPossible) * 100) 
         : 0;
-      const lateCheckIns = currentMetrics.totalPossible > 0 
-        ? Math.round((currentMetrics.lateCount / currentMetrics.totalPossible) * 100) 
+      const excusedRate = currentMetrics.totalPossible > 0 
+        ? Math.round((currentMetrics.excusedCount / currentMetrics.totalPossible) * 100) 
         : 0;
 
       // Calculate percentages for previous period
@@ -121,24 +126,92 @@ export default function AnalyticsPage() {
       const prevAbsenteeism = prevMetrics.totalPossible > 0 
         ? Math.round((prevMetrics.absentCount / prevMetrics.totalPossible) * 100) 
         : 0;
-      const prevLateCheckIns = prevMetrics.totalPossible > 0 
-        ? Math.round((prevMetrics.lateCount / prevMetrics.totalPossible) * 100) 
+      const prevExcusedRate = prevMetrics.totalPossible > 0 
+        ? Math.round((prevMetrics.excusedCount / prevMetrics.totalPossible) * 100) 
         : 0;
 
-      // Fraud attempts (placeholder for now - update when fraud schema is complete)
-      const fraudAttempts = 2; // Placeholder
-      const prevFraudAttempts = 1; // Placeholder
+      // Fraud attempts - fetch from fraud_detection_alerts table (only open/unresolved)
+      const dateRange = getDateRange();
+      
+      console.log('Analytics: Fetching fraud data with date range:', dateRange);
+      
+      const { data: fraudData, error: fraudError } = await supabase
+        .from("fraud_detection_alerts")
+        .select("id, created_at, status")
+        .gte("created_at", dateRange.start);
+
+      console.log('Analytics: Fraud data query result:', { 
+        fraudData, 
+        fraudError, 
+        count: fraudData?.length,
+        dateRangeStart: dateRange.start 
+      });
+
+      const fraudAttempts = fraudData?.length || 0;
+
+      // Previous period fraud attempts (before current time range)
+      const { data: prevFraudData } = await supabase
+        .from("fraud_detection_alerts")
+        .select("id")
+        .lt("created_at", dateRange.start);
+
+      const prevFraudAttempts = prevFraudData?.length || 0;
 
       setKpiData({
         avgAttendanceRate,
         chronicAbsenteeism,
-        lateCheckIns,
+        excusedRate,
         fraudAttempts,
         prevAttendanceRate,
         prevAbsenteeism,
-        prevLateCheckIns,
+        prevExcusedRate,
         prevFraudAttempts,
       });
+
+      // Fetch fraud by method data
+      const { data: fraudByMethodData } = await supabase
+        .from("fraud_detection_alerts")
+        .select("description")
+        .gte("created_at", dateRange.start);
+
+      if (fraudByMethodData && fraudByMethodData.length > 0) {
+        const fraudCounts = {};
+        fraudByMethodData.forEach(alert => {
+          const desc = alert.description || "";
+          
+          // Check what anomalies are present
+          const hasLocation = desc.includes("Far from class");
+          const hasTime = desc.includes("Late for Check In") || desc.includes("Early Check In");
+          
+          let category;
+          if (hasLocation && hasTime) {
+            category = "Location + Time Anomaly";
+          } else if (hasLocation) {
+            category = "Location Anomaly";
+          } else if (hasTime) {
+            category = "Time Anomaly";
+          } else {
+            category = "Other";
+          }
+          
+          fraudCounts[category] = (fraudCounts[category] || 0) + 1;
+        });
+        
+        const total = fraudByMethodData.length;
+        const fraudItems = Object.entries(fraudCounts)
+          .map(([method, count]) => ({
+            label: method,
+            value: Math.round((count / total) * 100),
+            color: method === "Location + Time Anomaly" ? "#dc2626" : 
+                   method === "Location Anomaly" ? "#ef4444" : 
+                   method === "Time Anomaly" ? "#f59e0b" : "#6b7280",
+          }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 5); // Top 5
+        setFraudByMethod(fraudItems);
+      } else {
+        setFraudByMethod([]);
+      }
     } catch (error) {
       console.error("Error fetching analytics data:", error);
     } finally {
@@ -171,7 +244,11 @@ export default function AnalyticsPage() {
         <Sidebar />
       </div>
 
-      <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
+      <main
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
+      >
         <div>
           <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
             Analytics
@@ -233,10 +310,10 @@ export default function AnalyticsPage() {
                 change: kpiData.chronicAbsenteeism - kpiData.prevAbsenteeism,
               },
               {
-                title: "Late Check-ins",
-                value: `${kpiData.lateCheckIns}%`,
+                title: "Excused Rate",
+                value: `${kpiData.excusedRate}%`,
                 icon: <AccessTime />,
-                change: kpiData.lateCheckIns - kpiData.prevLateCheckIns,
+                change: kpiData.excusedRate - kpiData.prevExcusedRate,
               },
               {
                 title: "Fraud Attempts",
@@ -313,33 +390,35 @@ export default function AnalyticsPage() {
                 <FraudDetectionChart timeRange={timeRange} />
               </CardContent>
             </Card>
-            {/*
             <Card sx={{ background: "#ffffff", border: "1px solid #e2e8f0" }}>
-              <CardHeader title="Fraud by Method" />
+              <CardHeader title="Fraud by Method" subheader="Distribution of fraud detection types" />
               <CardContent sx={{ height: 300, pt: 2 }}>
-                <Box display="flex" flexDirection="column" gap={3}>
-                  {fraudItems.map((item) => (
-                    <Box key={item.label} display="flex" flexDirection="column" gap={1}>
-                      <Box display="flex" justifyContent="space-between">
-                        <Typography variant="body2" fontWeight="medium">{item.label}</Typography>
-                        <Typography variant="body2" color="text.secondary">{`${item.value}%`}</Typography>
+                {fraudByMethod.length > 0 ? (
+                  <Box display="flex" flexDirection="column" gap={3}>
+                    {fraudByMethod.map((item) => (
+                      <Box key={item.label} display="flex" flexDirection="column" gap={1}>
+                        <Box display="flex" justifyContent="space-between">
+                          <Typography variant="body2" fontWeight="medium">{item.label}</Typography>
+                          <Typography variant="body2" color="text.secondary">{`${item.value}%`}</Typography>
+                        </Box>
+                        <LinearProgress
+                          variant="determinate"
+                          value={item.value}
+                          sx={{
+                            height: 8,
+                            borderRadius: 4,
+                            backgroundColor: "#e5e7eb",
+                            '& .MuiLinearProgress-bar': { backgroundColor: item.color },
+                          }}
+                        />
                       </Box>
-                      <LinearProgress
-                        variant="determinate"
-                        value={item.value}
-                        sx={{
-                          height: 8,
-                          borderRadius: 4,
-                          backgroundColor: theme.palette.grey[300],
-                          '& .MuiLinearProgress-bar': { backgroundColor: item.color },
-                        }}
-                      />
-                    </Box>
-                  ))}
-                </Box>
+                    ))}
+                  </Box>
+                ) : (
+                  <Typography color="text.secondary" align="center" sx={{ py: 4 }}>No fraud detected in this period</Typography>
+                )}
               </CardContent>
             </Card>
-            */}
           </div>
         </Box>
       </main>

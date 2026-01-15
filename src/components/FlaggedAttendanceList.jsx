@@ -1,5 +1,5 @@
 import { Search, AccessTime, LocationOn, Report, Flag as FlagIcon, Close as CloseIcon } from "@mui/icons-material"
-import React, { useState } from "react"
+import React, { useState, useMemo } from "react"
 import {
   Avatar,
   AvatarGroup,
@@ -16,6 +16,8 @@ import {
   TableRow,
   TextField,
   Typography,
+  Snackbar,
+  Alert,
 } from "@mui/material"
 import ViewDetailsButton from "./ViewDetailsButton"
 import supabase from "../config/supabaseClient";
@@ -89,7 +91,8 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
     }
     if (checkLat != null && checkLng != null && classLat != null && classLng != null) {
       const distance = haversineDistance(checkLat, checkLng, classLat, classLng);
-      const isWithinRange = distance <= 0.5;
+      // Use same threshold as fraud detection (0.1 km)
+      const isWithinRange = distance <= 0.1;
       return {
         distance,
         isWithinRange,
@@ -103,6 +106,14 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
   }
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [activeTab, setActiveTab] = useState(0);
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [actionSnack, setActionSnack] = useState({ open: false, message: "", severity: "success" });
+  const user = useMemo(() => {
+    const cached = sessionStorage.getItem("user");
+    return cached ? JSON.parse(cached) : null;
+  }, []);
 
   // No search, just use students directly
   const filteredStudents = students;
@@ -111,18 +122,262 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
   const handleViewDetails = (student) => {
     setSelectedStudent(student);
     setDetailsOpen(true);
+    setActiveTab(0); // Reset to first tab
+    fetchAttendanceHistory(student); // Fetch history when opening details
   };
 
   const handleCloseDetails = () => {
     setDetailsOpen(false);
     setSelectedStudent(null);
+    setAttendanceHistory([]);
+  };
+
+  // Fetch attendance history for selected student
+  const fetchAttendanceHistory = async (student) => {
+    if (!student?.enrollmentId) {
+      setAttendanceHistory([]);
+      return;
+    }
+
+    setIsLoadingHistory(true);
+    try {
+      // Determine the correct enrollment field based on session type
+      const isLecture = session?.type === "Lecture";
+      const attendanceField = isLecture ? "lecture_enrollment_id" : "tutorial_enrollment_id";
+      const startDate = session?.startDate || session?.lecture_start_date || session?.tutorial_start_date;
+      const endDate = session?.endDate || session?.lecture_end_date || session?.tutorial_end_date;
+    
+      // Get all sessions for this class
+      let sessionsQuery = supabase
+        .from("attendance_session")
+        .select("id, created_at, date")
+        .eq(isLecture ? 'course_lecture_id' : 'course_tutorial_id', session.id);
+        
+      if (startDate) {
+        sessionsQuery = sessionsQuery.gte('created_at', new Date(startDate).toISOString());
+      }
+      if (endDate) {
+        sessionsQuery = sessionsQuery.lte('created_at', new Date(endDate).toISOString());
+      }
+
+      sessionsQuery = sessionsQuery.order('created_at', { ascending: false }).limit(20);
+
+      const { data: sessions, error: sessionsError } = await sessionsQuery;
+
+      if (sessionsError) throw sessionsError;
+
+      if (!sessions || sessions.length === 0) {
+        setAttendanceHistory([]);
+        setIsLoadingHistory(false);
+        return;
+      }
+
+      // Get attendance records for this student
+      const sessionIds = sessions.map(s => s.id);
+      const { data: records, error: recordsError } = await supabase
+        .from("attendance_record")
+        .select("*")
+        .eq(attendanceField, student.enrollmentId)
+        .in('session_id', sessionIds);
+
+      if (recordsError) throw recordsError;
+
+      // Get leave/absence requests
+      const { data: leaveRequests, error: leaveError } = await supabase
+        .from("leave_requests")
+        .select("*")
+        .eq("user_id", student.student_id)
+        .eq("status", "approved");
+
+      if (leaveError) console.error("Error fetching leave requests:", leaveError);
+
+      // Format date
+      const formatDate = (dateString) => {
+        if (!dateString) return "-";
+        const date = new Date(dateString);
+        return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+      };
+
+      // Check if excused
+      const isExcused = (sessionDate) => {
+        if (!leaveRequests || leaveRequests.length === 0) return false;
+        const date = new Date(sessionDate);
+        return leaveRequests.some(leave => {
+          const startDate = new Date(leave.start_date);
+          const endDate = new Date(leave.end_date);
+          return date >= startDate && date <= endDate;
+        });
+      };
+
+      // Create history for all sessions
+      const formattedHistory = sessions.map(session => {
+        const sessionDate = session.date || session.created_at;
+        const attendanceRecord = records?.find(r => r.session_id === session.id);
+        
+        if (attendanceRecord) {
+          return {
+            date: formatDate(sessionDate),
+            status: attendanceRecord.status,
+            checkInTime: attendanceRecord.created_at,
+            sessionId: session.id,
+            flagReason: attendanceRecord.flag_reason
+          };
+        }
+        
+        if (isExcused(sessionDate)) {
+          return {
+            date: formatDate(sessionDate),
+            status: "excused",
+            checkInTime: null,
+            sessionId: session.id,
+            flagReason: null
+          };
+        }
+        
+        return {
+          date: formatDate(sessionDate),
+          status: "absent",
+          checkInTime: null,
+          sessionId: session.id,
+          flagReason: null
+        };
+      });
+
+      setAttendanceHistory(formattedHistory);
+    } catch (error) {
+      console.error("Error fetching attendance history:", error);
+      setAttendanceHistory([]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  const handleEmailStudent = async () => {
+    if (!selectedStudent) return;
+    const student = {
+      email: selectedStudent.email || selectedStudent.student_email,
+      name: selectedStudent.name,
+      id: selectedStudent.student_id || selectedStudent.id,
+      matric_number: selectedStudent.matric_number || selectedStudent.studentId
+    };
+    if (!student.email) {
+      setActionSnack({ open: true, message: "No student email available.", severity: "warning" });
+      return;
+    }
+    const courseLabel = session?.code || session?.course_code || "Course";
+    const studentName = student.name || student.matric_number || "Student";
+    const flagReason = selectedStudent.flag_reason || selectedStudent.flagReason || "Attendance flagged";
+    const bodyHtml = `
+      <div style="font-family: Arial, sans-serif; color:#0f172a;">
+        <p>Dear ${studentName},</p>
+        <p>Your attendance for <strong>${courseLabel}</strong> has been flagged.</p>
+        <p><strong>Reason:</strong> ${flagReason}</p>
+        <p>Please contact your lecturer to clarify this matter.</p>
+        <br/>
+        <p>Regards,<br/>Attendance Management System</p>
+      </div>
+    `;
+    try {
+      const { error } = await supabase.functions.invoke('send-absence-email', {
+        body: {
+          emails: [{
+            to: student.email,
+            subject: `Attendance Alert - ${courseLabel}`,
+            html: bodyHtml,
+            studentId: student.id,
+            studentName,
+          }],
+          lecturerId: user?.id || null,
+        },
+      });
+      if (error) {
+        console.error('Email function error:', error);
+        setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
+      } else {
+        setActionSnack({ open: true, message: 'Email sent to student.', severity: 'success' });
+      }
+    } catch (e) {
+      console.error('Invoke email function failed:', e);
+      setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
+    }
+  };
+
+  const handleMarkFraud = async () => {
+    if (!selectedStudent) return;
+    const attendanceId = selectedStudent.attendance_id || selectedStudent.id || (selectedStudent.attendance_record && selectedStudent.attendance_record.id);
+    if (!attendanceId) {
+      setActionSnack({ open: true, message: 'Attendance record ID not found.', severity: 'error' });
+      return;
+    }
+    const { error } = await supabase
+      .from('attendance_record')
+      .update({ status: 'fraud' })
+      .eq('id', attendanceId);
+    if (error) {
+      setActionSnack({ open: true, message: 'Failed to update: ' + error.message, severity: 'error' });
+      return;
+    }
+    setActionSnack({ open: true, message: 'Attendance marked as fraud.', severity: 'success' });
+    if (onRefresh) await onRefresh();
+    handleCloseDetails();
   };
 
   const handleMarkPresent = async () => {
     if (!selectedStudent) return;
+    
+    // Get student ID - try all possible fields
+    const studentId = selectedStudent.student_id || selectedStudent.userId || selectedStudent.user_id || selectedStudent.id;
+    const sessionId = sessionInfo?.sessionId;
+    
+    console.log('Mark Present - Deleting fraud alert:', { studentId, sessionId, selectedStudent, sessionInfo });
+    
+    // First, check what fraud alerts exist for this student
+    const { data: existingAlerts, error: checkError } = await supabase
+      .from('fraud_detection_alerts')
+      .select('*')
+      .eq('user_id', studentId);
+    console.log('Existing fraud alerts for student:', existingAlerts);
+    console.log('Looking for user_id:', studentId);
+    
+    // Also check by session
+    const { data: sessionAlerts, error: sessionError } = await supabase
+      .from('fraud_detection_alerts')
+      .select('*')
+      .eq('session_id', sessionId);
+    console.log('Existing fraud alerts for session:', sessionAlerts);
+    console.log('Looking for session_id:', sessionId);
+    
+    // Check if both conditions match
+    const { data: bothMatch, error: bothError } = await supabase
+      .from('fraud_detection_alerts')
+      .select('*')
+      .eq('user_id', studentId)
+      .eq('session_id', sessionId);
+    console.log('Fraud alerts matching BOTH user_id AND session_id:', bothMatch);
+    
     // If parent handleMarkPresent is provided, use it (for consistent logic with absent tab)
     if (typeof parentHandleMarkPresent === 'function') {
       await parentHandleMarkPresent(selectedStudent.matric_number || selectedStudent.studentId || selectedStudent.id);
+      
+      // Update fraud alert status to 'resolved' instead of deleting (for fraud analysis)
+      if (bothMatch && bothMatch.length > 0) {
+        const alertIds = bothMatch.map(alert => alert.id);
+        console.log('Updating fraud alerts to resolved:', alertIds);
+        const { data, error } = await supabase
+          .from('fraud_detection_alerts')
+          .update({ status: 'resolved' })
+          .in('id', alertIds)
+          .select();
+        console.log('Fraud alert update result (parent path):', { data, error, updatedCount: data?.length, alertIds });
+        if (data && data.length > 0) {
+          console.log('Successfully marked fraud alerts as resolved:', data);
+        } else {
+          console.warn('Failed to update fraud alerts status', { error, alertIds });
+        }
+      } else {
+        console.warn('No fraud alerts found to update for:', { studentId, sessionId });
+      }
+      
       if (onRefresh) await onRefresh();
       handleCloseDetails();
       return;
@@ -141,6 +396,26 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
       alert('Failed to update attendance: ' + error.message);
       return;
     }
+    
+    // Update fraud alert status to 'resolved' instead of deleting (for fraud analysis)
+    if (bothMatch && bothMatch.length > 0) {
+      const alertIds = bothMatch.map(alert => alert.id);
+      console.log('Updating fraud alerts to resolved (fallback path):', alertIds);
+      const { data, error: updateError } = await supabase
+        .from('fraud_detection_alerts')
+        .update({ status: 'resolved' })
+        .in('id', alertIds)
+        .select();
+      console.log('Fraud alert update result (fallback path):', { data, error: updateError, updatedCount: data?.length, alertIds });
+      if (data && data.length > 0) {
+        console.log('Successfully marked fraud alerts as resolved:', data);
+      } else {
+        console.warn('Failed to update fraud alerts status', { error: updateError, alertIds });
+      }
+    } else {
+      console.warn('No fraud alerts found to update for:', { studentId, sessionId });
+    }
+    
     selectedStudent.status = 'present';
     selectedStudent.marked_manually = true;
     if (onRefresh) onRefresh();
@@ -211,7 +486,9 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      {flagReason}
+                      <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+                        {flagReason}
+                      </Typography>
                     </TableCell>
                     <TableCell>
                       {checkInTime}
@@ -273,36 +550,48 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                       <Typography variant="body2">
                         {(() => {
                           let t = selectedStudent.checkInTime || selectedStudent.check_in_time || '';
-                          if (typeof t === 'string') {
-                            if (t.includes('T')) {/* Lines 290-293 omitted */} else {/* Lines 294-295 omitted */}
+                          if (typeof t === 'string' && t) {
+                            if (t.includes('T')) {
+                              const d = new Date(t);
+                              if (!isNaN(d)) {
+                                return d.toLocaleString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  year: 'numeric', 
+                                  hour: '2-digit', 
+                                  minute: '2-digit', 
+                                  second: '2-digit', 
+                                  hour12: true, 
+                                  timeZone: 'UTC' 
+                                }) + ' UTC';
+                              }
+                            } else {
+                              return t.replace('+00:00', '').replace('Z', '');
+                            }
                           }
                           return t || '-';
-                        })()}
-                      </Typography>
-                    </Box>
-                    <Box display="flex" alignItems="center" gap={1} mt={1} justifyContent="flex-end">
-                      <LocationOn color="primary" fontSize="small" />
-                      <Typography variant="body2">
-                        {(() => {
-                          if (selectedStudent.attendance_record && selectedStudent.attendance_record.latitude != null) {
-                            return `${Number(selectedStudent.attendance_record.latitude).toFixed(4)}, ${Number(selectedStudent.attendance_record.longitude).toFixed(4)}`;
-                          } else if (selectedStudent.checkInLocation && selectedStudent.checkInLocation.lat != null) {/* Lines 308-309 omitted */} else
-                          return 'N/A';
                         })()}
                       </Typography>
                     </Box>
                   </Box>
                 </Box>
                 <Divider sx={{ my: 2 }} />
-                {/* Tabs for Details/History (future extensibility) */}
-                <Tabs value={0} sx={{ mb: 2 }}>
+                {/* Tabs for Details/History */}
+                <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)} sx={{ mb: 2 }}>
                   <Tab label="Attendance Details" />
+                  <Tab label="Attendance History" />
                 </Tabs>
-                {/* Flag Reason */}
-                <Box display="flex" alignItems="center" gap={1} mb={2}>
-                  <Report color="error" fontSize="small" />
-                  <Typography variant="body1"><b>Flag Reason:</b> {selectedStudent.flag_reason || selectedStudent.flagReason}</Typography>
-                </Box>
+                
+                {/* Tab 0: Attendance Details */}
+                {activeTab === 0 && (
+                  <>
+                    {/* Flag Reason */}
+                    <Box display="flex" alignItems="flex-start" gap={1} mb={2}>
+                      <Report color="error" fontSize="small" sx={{ mt: 0.5 }} />
+                      <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+                        <b>Flag Reason:</b> {selectedStudent.flag_reason || selectedStudent.flagReason}
+                      </Typography>
+                    </Box>
                 {/* Location Analysis Section */}
                 <Box mb={3}>
                   <Box sx={{ background: '#f0f7fa', borderRadius: 2, p: 2 }}>
@@ -390,19 +679,27 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                       <Report color="error" fontSize="small" />
                       <Typography variant="body2">
                         <b>Difference:</b> {(() => {
-                          const sessionRaw = sessionInfo && sessionInfo.start_time;
+                          let sessionRaw = sessionInfo && sessionInfo.start_time;
                           let checkInRaw = selectedStudent?.checkInTime || selectedStudent?.check_in_time;
                           if (!sessionRaw || !checkInRaw) return '-';
+                          
+                          // FIX: Replace +00:00 with +08:00 in check-in time (it's stored in UTC but should be Malaysia time)
+                          if (typeof checkInRaw === 'string' && checkInRaw.includes('+00:00')) {
+                            checkInRaw = checkInRaw.replace('+00:00', '+08:00');
+                          }
+                          
                           let sessionStart, checkIn;
                           try {
-                            // Parse sessionStart robustly: if ISO, use as is; if just time, use date from checkInRaw or today
+                            // Parse sessionStart robustly: if ISO, use as is; if just time, use same day as checkInRaw
                             if (typeof sessionRaw === 'string' && sessionRaw.includes('T')) {
                               sessionStart = new Date(sessionRaw);
                             } else if (typeof sessionRaw === 'string') {
+                              // If just time string, use date from checkInRaw or today
                               let dateStr = null;
                               if (typeof checkInRaw === 'string' && checkInRaw.includes('T')) {
                                 dateStr = checkInRaw.split('T')[0];
                               } else {
+                                // fallback to today
                                 const today = new Date();
                                 dateStr = today.toISOString().split('T')[0];
                               }
@@ -410,28 +707,22 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                             } else {
                               sessionStart = new Date(sessionRaw);
                             }
-                            let usedNextDay = false;
                             if (typeof checkInRaw === 'string' && checkInRaw.includes('T')) {
                               checkIn = new Date(checkInRaw);
                             } else if (typeof checkInRaw === 'string') {
+                              // If just time string, parse as UTC+8 (KL) on same day as sessionStart
                               const sessionDate = sessionStart.toISOString().split('T')[0];
                               checkIn = new Date(`${sessionDate}T${checkInRaw}+08:00`);
-                              // If check-in time is less than session start time, assume next day
-                              if (checkIn < sessionStart) {
-                                checkIn = new Date(checkIn.getTime() + 24 * 60 * 60 * 1000);
-                                usedNextDay = true;
-                              }
                             } else {
                               checkIn = new Date(checkInRaw);
                             }
-                            // Debug: log parsed times
-                            console.log('FlaggedAttendanceList: sessionStart', sessionStart, 'checkIn', checkIn, 'usedNextDay', usedNextDay);
                             if (isNaN(sessionStart) || isNaN(checkIn)) return '-';
+                            // Calculate difference in minutes
                             const diffMs = checkIn.getTime() - sessionStart.getTime();
                             const diffMin = Math.round(diffMs / 60000);
                             return `${diffMin} min${Math.abs(diffMin) !== 1 ? 's' : ''}`;
                           } catch (e) {
-                            console.error('FlaggedAttendanceList: error calculating time difference', e, { sessionRaw, checkInRaw });
+                            console.error('Time difference calculation error:', e);
                             return '-';
                           }
                         })()}
@@ -439,15 +730,108 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                     </Box>
                   </Box>
                 </Box>
+                  </>
+                )}
+                
+                {/* Tab 1: Attendance History */}
+                {activeTab === 1 && (
+                  <Box>
+                    <Typography variant="h6" gutterBottom>Attendance History</Typography>
+                    {isLoadingHistory ? (
+                      <Box textAlign="center" py={4}>
+                        <Typography variant="body2" color="text.secondary">
+                          Loading attendance history...
+                        </Typography>
+                      </Box>
+                    ) : attendanceHistory.length === 0 ? (
+                      <Box textAlign="center" py={4}>
+                        <Typography variant="body2" color="text.secondary">
+                          No attendance history found.
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <TableContainer component={Paper} sx={{ mt: 2 }}>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell><b>Date</b></TableCell>
+                              <TableCell><b>Status</b></TableCell>
+                              <TableCell><b>Check-in Time</b></TableCell>
+                              <TableCell><b>Notes</b></TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {attendanceHistory.map((record, index) => {
+                              const statusColor = 
+                                record.status === 'present' ? 'success' :
+                                record.status === 'flagged' ? 'warning' :
+                                record.status === 'excused' ? 'info' : 'error';
+                              
+                              return (
+                                <TableRow key={index}>
+                                  <TableCell>{record.date}</TableCell>
+                                  <TableCell>
+                                    <Button 
+                                      size="small" 
+                                      variant="outlined" 
+                                      color={statusColor}
+                                      sx={{ textTransform: 'capitalize', minWidth: 80 }}
+                                    >
+                                      {record.status}
+                                    </Button>
+                                  </TableCell>
+                                  <TableCell>
+                                    {record.checkInTime ? (() => {
+                                      const timestamp = record.checkInTime;
+                                      if (typeof timestamp === 'string' && timestamp.includes('T')) {
+                                        const timePart = timestamp.split('T')[1];
+                                        return timePart.split('.')[0].replace('Z', '').replace('+00:00', '');
+                                      }
+                                      return timestamp;
+                                    })() : '-'}
+                                  </TableCell>
+                                  <TableCell>
+                                    {record.flagReason || '-'}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </Box>
+                )}
               </Box>
             </DialogContent>
-            <DialogActions sx={{ px: 3, py: 2, justifyContent: 'flex-end' }}>
-              <Button onClick={handleCloseDetails} variant="outlined">Close</Button>
-              <Button onClick={handleMarkPresent} variant="contained" color="success">Mark as Present</Button>
+            <DialogActions sx={{ px: 3, py: 2, justifyContent: 'space-between' }}>
+              <Box display="flex" gap={1}>
+                <Button variant="outlined" onClick={handleEmailStudent}>Email Student</Button>
+              </Box>
+              <Box display="flex" gap={1}>
+                <Button onClick={handleMarkFraud} variant="outlined" color="warning">Mark Fraud</Button>
+                <Button onClick={handleMarkPresent} variant="contained" color="success">Mark as Present</Button>
+              </Box>
             </DialogActions>
           </>
         )}
       </Dialog>
+
+      {/* Snackbar for action feedback */}
+      <Snackbar
+        open={actionSnack.open}
+        autoHideDuration={4000}
+        onClose={() => setActionSnack({ ...actionSnack, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setActionSnack({ ...actionSnack, open: false })}
+          severity={actionSnack.severity}
+          sx={{ width: '100%' }}
+        >
+          {actionSnack.message}
+        </Alert>
+      </Snackbar>
     </div>
   );
 }

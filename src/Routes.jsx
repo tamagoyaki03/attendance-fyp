@@ -47,7 +47,7 @@ const AppRoutes = () => {
             <Route path="/absence-management" element={<ProtectedRoute element={<AbsenceManagement />} />} />
             <Route path="/analytics" element={<ProtectedRoute element={<AnalyticsPage />} />} />
             <Route path="/reports" element={<ProtectedRoute element={<ReportsPage />} />} />
-            <Route path="/student-absence/submit" element={<ProtectedRoute element={<SubmitAbsenceDocumentPage />} />} />
+            <Route path="/student-absence/submit" element={<SubmitAbsenceDocumentPage />} />
           </Routes>
   );
 };

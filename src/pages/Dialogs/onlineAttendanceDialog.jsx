@@ -11,9 +11,10 @@ import Box from "@mui/material/Box";
 export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
   const [recordingLink, setRecordingLink] = useState("");
   const [quizContent, setQuizContent] = useState("{\n  \"question\": \"\",\n  \"options\": [],\n  \"answer\": \"\"\n}");
+  const [minWatchTime, setMinWatchTime] = useState("");
 
   const handleProceed = () => {
-    onProceed({ recordingLink, quizContent });
+    onProceed({ recordingLink, quizContent, minWatchTime });
   };
 
   return (
@@ -42,6 +43,27 @@ export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
             value={recordingLink}
             onChange={(e) => setRecordingLink(e.target.value)}
             size="small"
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                backgroundColor: "#fff",
+                "& fieldset": { borderColor: "#e6edf3" },
+                "&:hover fieldset": { borderColor: "#cbd5e1" },
+                "&.Mui-focused fieldset": { borderColor: "#0f172a" },
+              },
+            }}
+          />
+        </Box>
+
+        <Box sx={{ mb: 2 }}>
+          <TextField
+            label="Minimum Watch Time (minutes)"
+            variant="outlined"
+            fullWidth
+            type="number"
+            value={minWatchTime}
+            onChange={(e) => setMinWatchTime(e.target.value)}
+            size="small"
+            placeholder="e.g., 30"
             sx={{
               "& .MuiOutlinedInput-root": {
                 backgroundColor: "#fff",

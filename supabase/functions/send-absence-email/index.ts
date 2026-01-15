@@ -72,14 +72,8 @@ serve(async (req) => {
         console.log(`✅ Email sent successfully to ${emailData.to}`);
         debugInfo.lastSentEmail = emailData.to;
 
-        // Log to database
-        const logRes = await supabaseClient
-          .from('absence_emails')
-          .insert({
-            student_id: emailData.studentId,
-            lecturer_id: lecturerId,
-          });
-        debugInfo.lastDbLog = logRes.error ? logRes.error.message : 'success';
+        // Logging is now handled by the caller (sendAbsenceAfterLectureEnd.js)
+        // which includes the session_id for proper tracking
 
         sentEmails.push(emailData.to);
 

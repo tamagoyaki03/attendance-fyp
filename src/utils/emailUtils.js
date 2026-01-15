@@ -35,7 +35,7 @@ export const sendAbsenceNotificationEmails = async (
   }
 
   try {
-    const baseUrl = window.location.origin;
+    const baseUrl = "https://attendance-fyp.vercel.app";
 
     // Prepare email data for each student
     const emailsToSend = [];
@@ -93,18 +93,8 @@ export const sendAbsenceNotificationEmails = async (
         console.log(`     Preview: ${email.html.substring(0, 100)}...`);
       });
       
-      // Still log to database
-      try {
-        for (const email of emailsToSend) {
-          await supabase.from('absence_emails').insert({
-            student_id: email.studentId,
-            lecturer_id: lecturerId,
-          });
-        }
-        console.log(`✅ Logged ${emailsToSend.length} notifications to database`);
-      } catch (dbError) {
-        console.warn("⚠️ Database logging skipped:", dbError.message);
-      }
+      // Logging is now handled by the caller (sendAbsenceAfterLectureEnd.js)
+      // which includes the session_id for proper tracking
       
       return {
         success: true,

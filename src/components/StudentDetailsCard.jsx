@@ -23,7 +23,15 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  // Track current attendance record with real-time updates
+  const [currentAttendanceRecord, setCurrentAttendanceRecord] = useState(student?.attendanceRecord || null);
+  // Get session start time from student object (pre-fetched in AttendanceManagement)
+  const sessionStartTime = student?.sessionStartTime || null;
 
+  // Update local state when student prop changes
+  useEffect(() => {
+    setCurrentAttendanceRecord(student?.attendanceRecord || null);
+  }, [student?.attendanceRecord]);
 
   // Fetch attendance history when component opens
   useEffect(() => {
@@ -40,67 +48,105 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
         const startDate = classData?.startDate || classData?.lecture_start_date || classData?.tutorial_start_date;
         const endDate = classData?.endDate || classData?.lecture_end_date || classData?.tutorial_end_date;
       
-        // First, get attendance records for this student
-       const { data: records, error: recordsError } = await supabase
-         .from("attendance_record")
-         .select("*")
-         .eq(attendanceField, student.enrollmentId)
-         .order('created_at', { ascending: false })
-         .limit(20); 
+        // Get ALL sessions for this class
+        let sessionsQuery = supabase
+          .from("attendance_session")
+          .select("id, created_at, date")
+          .eq(student.classType === "Tutorial" ? 'course_tutorial_id' : 'course_lecture_id', classData.id);
+          
+        // Filter by class date range if available
+        if (startDate) {
+          sessionsQuery = sessionsQuery.gte('created_at', new Date(startDate).toISOString());
+        }
+        if (endDate) {
+          sessionsQuery = sessionsQuery.lte('created_at', new Date(endDate).toISOString());
+        }
 
-       if (recordsError) throw recordsError;
+        sessionsQuery = sessionsQuery.order('created_at', { ascending: false }).limit(20);
 
-       if (!records || records.length === 0) {
-         setAttendanceHistory([]);
-         return;
-       }
-       
-       // Get session details for these records
-       const sessionIds = records.map(record => record.session_id);
-       let sessionsQuery = supabase
-         .from("attendance_session")
-         .select("id, created_at, date")
-         .in('id', sessionIds);
-         
-       // Filter by class date range if available
-       if (startDate) {
-         sessionsQuery = sessionsQuery.gte('created_at', new Date(startDate).toISOString());
-       }
-       if (endDate) {
-         sessionsQuery = sessionsQuery.lte('created_at', new Date(endDate).toISOString());
-       }
+        const { data: sessions, error: sessionsError } = await sessionsQuery;
 
-       const { data: sessions, error: sessionsError } = await sessionsQuery;
+        if (sessionsError) throw sessionsError;
 
-       if (sessionsError) throw sessionsError;
-        
-        // Format the records for display
-        const formattedHistory = records
-          .filter(record => sessions.some(s => s.id === record.session_id)) // Only include records with valid sessions
-          .map(record => {
-            const session = sessions.find(s => s.id === record.session_id);
-            const sessionDate = session ? (session.date || session.created_at) : record.created_at;
+        if (!sessions || sessions.length === 0) {
+          setAttendanceHistory([]);
+          return;
+        }
 
-            // Format date and check-in time in UTC
-            const formatUtcDate = (dateString) => {
-              if (!dateString) return "-";
-              const date = new Date(dateString);
-              return date.toLocaleDateString("en-US", { timeZone: "UTC", year: "numeric", month: "short", day: "numeric" });
-            };
-            const formatUtcTime = (dateString) => {
-              if (!dateString) return null;
-              const date = new Date(dateString);
-              return date.toLocaleTimeString("en-US", { timeZone: "UTC", hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC";
-            };
+        // Get attendance records for this student
+        const sessionIds = sessions.map(s => s.id);
+        const { data: records, error: recordsError } = await supabase
+          .from("attendance_record")
+          .select("*")
+          .eq(attendanceField, student.enrollmentId)
+          .in('session_id', sessionIds);
 
-            return {
-              date: formatUtcDate(sessionDate),
-              status: record.status,
-              checkInTime: formatUtcTime(record.created_at),
-              sessionId: record.session_id,
-              notes: record.notes
-            };
+        if (recordsError) throw recordsError;
+
+        // Get leave/absence requests for this student
+        const { data: leaveRequests, error: leaveError } = await supabase
+          .from("leave_requests")
+          .select("*")
+          .eq("user_id", student.student_id)
+          .eq("status", "approved");
+
+        if (leaveError) console.error("Error fetching leave requests:", leaveError);
+
+        // Format date - add 8 hours for GMT+8
+        const formatDate = (dateString) => {
+          if (!dateString) return "-";
+          const date = new Date(dateString);
+          const localDate = new Date(date.getTime() + (8 * 60 * 60 * 1000));
+          return localDate.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+        };
+
+        // Check if a date is covered by an approved leave request
+        const isExcused = (sessionDate) => {
+          if (!leaveRequests || leaveRequests.length === 0) return false;
+          const date = new Date(sessionDate);
+          return leaveRequests.some(leave => {
+            const startDate = new Date(leave.start_date);
+            const endDate = new Date(leave.end_date);
+            return date >= startDate && date <= endDate;
           });
+        };
+
+        // Create history for all sessions
+        const formattedHistory = sessions.map(session => {
+          const sessionDate = session.date || session.created_at;
+          const attendanceRecord = records?.find(r => r.session_id === session.id);
+          
+          // If there's an attendance record, use it
+          if (attendanceRecord) {
+            return {
+              date: formatDate(sessionDate),
+              status: attendanceRecord.status,
+              checkInTime: attendanceRecord.created_at,
+              sessionId: session.id,
+              notes: attendanceRecord.notes
+            };
+          }
+          
+          // If no attendance record, check if excused
+          if (isExcused(sessionDate)) {
+            return {
+              date: formatDate(sessionDate),
+              status: "excused",
+              checkInTime: null,
+              sessionId: session.id,
+              notes: "Approved leave request"
+            };
+          }
+          
+          // Otherwise, mark as absent
+          return {
+            date: formatDate(sessionDate),
+            status: "absent",
+            checkInTime: null,
+            sessionId: session.id,
+            notes: null
+          };
+        });
 
        setAttendanceHistory(formattedHistory);
      } catch (error) {
@@ -113,6 +159,92 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
    };
    fetchAttendanceHistory();
  }, [student?.enrollmentId, open, student?.classType, classData]);
+
+  // Subscribe to real-time updates for attendance_record changes (fraud flagging)
+  useEffect(() => {
+    if (!student?.enrollmentId || !open) return;
+
+    const attendanceField = student.classType === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
+    
+    const channel = supabase
+      .channel(`attendance-updates-${student.enrollmentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'attendance_record',
+          filter: `${attendanceField}=eq.${student.enrollmentId}`
+        },
+        (payload) => {
+          // Update current attendance record immediately
+          console.log("Attendance record updated:", payload.new);
+          if (payload.new && payload.new.id === student?.attendanceRecord?.id) {
+            setCurrentAttendanceRecord(payload.new);
+          }
+          
+          // Re-fetch attendance history when a record is updated (e.g., flagged by fraud detection)
+          const attendanceField = student.classType === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
+          (async () => {
+            try {
+              const { data: sessions } = await supabase
+                .from("attendance_session")
+                .select("id, created_at, date")
+                .eq(student.classType === "Tutorial" ? 'course_tutorial_id' : 'course_lecture_id', classData.id)
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+              if (sessions && sessions.length > 0) {
+                const sessionIds = sessions.map(s => s.id);
+                const { data: records } = await supabase
+                  .from("attendance_record")
+                  .select("*")
+                  .eq(attendanceField, student.enrollmentId)
+                  .in('session_id', sessionIds);
+
+                // Update history with latest records
+                const formatDate = (dateString) => {
+                  if (!dateString) return "-";
+                  const date = new Date(dateString);
+                  const localDate = new Date(date.getTime() + (8 * 60 * 60 * 1000));
+                  return localDate.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+                };
+
+                const formattedHistory = sessions.map(session => {
+                  const sessionDate = session.date || session.created_at;
+                  const attendanceRecord = records?.find(r => r.session_id === session.id);
+                  if (attendanceRecord) {
+                    return {
+                      date: formatDate(sessionDate),
+                      status: attendanceRecord.status,
+                      checkInTime: attendanceRecord.created_at,
+                      sessionId: session.id,
+                      notes: attendanceRecord.notes
+                    };
+                  }
+                  return {
+                    date: formatDate(sessionDate),
+                    status: "absent",
+                    checkInTime: null,
+                    sessionId: session.id,
+                    notes: null
+                  };
+                });
+
+                setAttendanceHistory(formattedHistory);
+              }
+            } catch (error) {
+              console.error("Error refreshing attendance history:", error);
+            }
+          })();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [student?.enrollmentId, open, student?.classType, classData.id]);
 
  if (!student || !open) {
     return null;
@@ -133,11 +265,11 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
 
   // Calculate distance if both student and class have coordinates
   const getLocationInfo = () => {
-    if (!student.attendanceRecord || !student.classLocation) {
+    if (!currentAttendanceRecord || !student.classLocation) {
       return null;
     }
 
-    const record = student.attendanceRecord;
+    const record = currentAttendanceRecord;
     const classLoc = student.classLocation;
 
     if (record.latitude && record.longitude && classLoc.latitude && classLoc.longitude) {
@@ -218,7 +350,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
      // Add student info row
      excelData.push(['Student Information']);
      excelData.push(['Name:', student.name]);
-     excelData.push(['Student ID:', student.student_id || student.studentId]);
+     excelData.push(['Student ID:', student.matric_number]);
      excelData.push(['Email:', student.email]);
      excelData.push(['Class:', `${classData.course_code} - ${classData.course_title}`]);
      excelData.push(['Class Type:', classData.type]);
@@ -242,7 +374,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
            attendanceRecord.status.charAt(0).toUpperCase() + attendanceRecord.status.slice(1) : 
            'Absent',
          attendanceRecord ? 
-           new Date(attendanceRecord.created_at).toLocaleString() : 
+           attendanceRecord.created_at : // Use raw datetime directly
            '-',
        ];
 
@@ -319,6 +451,8 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
         return <Chip label="Tardy" color="warning" />;
       case "absent":
         return <Chip label="Absent" color="error" variant="outlined" />;
+      case "excused":
+        return <Chip label="Excused" color="info" />;
       case "flagged":
         return <Chip label="Flagged" color="error" variant="filled" icon={<FlagIcon />} />;
       default:
@@ -349,9 +483,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
     >
       <DialogTitle>
         <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6" fontWeight="bold">
-            Student Details
-          </Typography>
+          Student Details
           <IconButton onClick={onClose} size="small">
             <CloseIcon />
           </IconButton>
@@ -408,8 +540,8 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
 
             {/* Rest of your existing tab content... */}
             {activeTab === 0 && (
-              <Box display="grid" gridTemplateColumns={{ xs: "1fr", md: "1fr 1fr" }} gap={2}>
-                {student.attendanceRecord ? (
+              <Box>
+                {currentAttendanceRecord ? (
                   <Box>
                     {/* Basic Attendance Info */}
                     <Box mb={3}>
@@ -418,20 +550,80 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                         <Box>
                          <Typography variant="body2" color="text.secondary">Check-in Time</Typography>
                          <Typography variant="body1" fontWeight="bold">
-                           {formatUtcTime(student.attendanceRecord.created_at)}
+                           {formatUtcTime(currentAttendanceRecord.created_at)}
                          </Typography>
                        </Box>
                        <Box>
                          <Typography variant="body2" color="text.secondary">Status</Typography>
                          <Box mt={0.5}>
-                           {getStatusBadge(student.attendanceRecord.status)}
+                           {getStatusBadge(currentAttendanceRecord.status)}
                          </Box>
                        </Box>
                      </Box>
                    </Box>
 
-                   {/* Physical Class - Location Details */}
-                   {!student.isOnlineClass && (
+                   {/* Time Analysis and Location Verification - Side by Side */}
+                   <Box display="grid" gridTemplateColumns={{ xs: "1fr", md: "1fr 1fr" }} gap={3} mb={3}>
+                     {/* Time Analysis */}
+                     {sessionStartTime && currentAttendanceRecord?.created_at && (
+                       <Box>
+                         <Typography variant="h6" gutterBottom>
+                           <AccessTimeIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                           Time Analysis
+                         </Typography>
+                       {(() => {
+                         const sessionStart = new Date(sessionStartTime);
+                         const checkInTime = new Date(currentAttendanceRecord.created_at);
+                         const timeDiffMinutes = Math.round((checkInTime - sessionStart) / (1000 * 60));
+                         const isLate = timeDiffMinutes > 15; // Consider late if more than 15 minutes
+                         const isEarly = timeDiffMinutes < -5; // Early if checked in more than 5 minutes before start
+
+                         return (
+                           <Box>
+                             <Alert
+                               severity={isLate ? "warning" : isEarly ? "info" : "success"}
+                               sx={{ mb: 2 }}
+                             >
+                               <AlertTitle>
+                                 {isLate 
+                                   ? "Late Check-in" 
+                                   : isEarly 
+                                   ? "Early Check-in" 
+                                   : "On-time Check-in"}
+                               </AlertTitle>
+                               {isLate 
+                                 ? `Checked in ${Math.abs(timeDiffMinutes)} minutes after session start` 
+                                 : isEarly
+                                 ? `Checked in ${Math.abs(timeDiffMinutes)} minutes before session start`
+                                 : timeDiffMinutes >= 0
+                                 ? `Checked in ${timeDiffMinutes} minutes after session start (within acceptable range)`
+                                 : "Checked in on time"}
+                             </Alert>
+
+                             <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
+                               <Box>
+                                 <Typography variant="body2" color="text.secondary">Session Start Time</Typography>
+                                 <Typography variant="body2" fontWeight="bold">
+                                   {sessionStartTime?.match(/T(\d{2}:\d{2}:\d{2})/) 
+                                     ? sessionStartTime.match(/T(\d{2}:\d{2}:\d{2})/)[1] 
+                                     : sessionStartTime}
+                                 </Typography>
+                               </Box>
+                               <Box>
+                                 <Typography variant="body2" color="text.secondary">Time Difference</Typography>
+                                 <Typography variant="body2" fontWeight="bold" color={isLate ? "error.main" : "text.primary"}>
+                                   {timeDiffMinutes > 0 ? "+" : ""}{timeDiffMinutes} minutes
+                                 </Typography>
+                               </Box>
+                             </Box>
+                           </Box>
+                         );
+                       })()}
+                       </Box>
+                     )}
+
+                     {/* Physical Class - Location Details */}
+                     {!student.isOnlineClass && (
                      <Box mb={3}>
                        <Typography variant="h6" gutterBottom>
                          <LocationOnIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
@@ -480,11 +672,12 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                            Location data not available for this attendance record.
                          </Alert>
                        )}
-                     </Box>
-                   )}
+                       </Box>
+                     )}
+                   </Box>
 
                    {/* Online Class - Verification Data */}
-                   {student.isOnlineClass && student.attendanceRecord.verification_data && (
+                   {student.isOnlineClass && currentAttendanceRecord?.verification_data && (
                      <Box mb={3}>
                        <Typography variant="h6" gutterBottom>
                          <QuizIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
@@ -496,7 +689,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                            <CardContent sx={{ textAlign: 'center' }}>
                              <TryIcon color="primary" sx={{ fontSize: 32, mb: 1 }} />
                              <Typography variant="h6" fontWeight="bold">
-                               {student.attendanceRecord.verification_data.attempts || 0}
+                               {currentAttendanceRecord.verification_data.attempts || 0}
                              </Typography>
                              <Typography variant="body2" color="text.secondary">
                                Quiz Attempts
@@ -508,7 +701,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                            <CardContent sx={{ textAlign: 'center' }}>
                              <QuizIcon color="success" sx={{ fontSize: 32, mb: 1 }} />
                              <Typography variant="h6" fontWeight="bold">
-                               {student.attendanceRecord.verification_data.quiz_score || 0}%
+                               {currentAttendanceRecord.verification_data.quiz_score || 0}%
                              </Typography>
                              <Typography variant="body2" color="text.secondary">
                                Quiz Score
@@ -520,7 +713,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                            <CardContent sx={{ textAlign: 'center' }}>
                              <PlayCircleIcon color="info" sx={{ fontSize: 32, mb: 1 }} />
                              <Typography variant="h6" fontWeight="bold">
-                               {Math.round((student.attendanceRecord.verification_data.watch_time || 0) / 60)}m
+                               {Math.round((currentAttendanceRecord.verification_data.watch_time || 0) / 60)}m
                              </Typography>
                              <Typography variant="body2" color="text.secondary">
                                Watch Time
@@ -529,7 +722,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                          </Card>
                        </Box>
 
-                       {student.attendanceRecord.verification_data.quiz_score < 60 && (
+                       {currentAttendanceRecord.verification_data.quiz_score < 60 && (
                          <Alert severity="warning" sx={{ mt: 2 }}>
                            <AlertTitle>Low Quiz Score</AlertTitle>
                            Student scored below 60% on the attendance verification quiz.
@@ -539,7 +732,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                    )}
 
                    {/* Additional Record Details */}
-                   {student.attendanceRecord.notes && (
+                   {currentAttendanceRecord?.notes && (
                      <Box mb={3}>
                        <Typography variant="h6" gutterBottom>Notes</Typography>
                        <Typography variant="body2" sx={{ 
@@ -548,7 +741,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                          borderRadius: 1,
                          fontStyle: 'italic'
                        }}>
-                         {student.attendanceRecord.notes}
+                         {currentAttendanceRecord.notes}
                        </Typography>
                      </Box>
                    )}

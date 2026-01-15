@@ -16,6 +16,7 @@ import ClassAttendance from "../components/Event/ClassAttendance";
 import StudentView from "../components/Event/StudentsView";
 import supabase from "../config/supabaseClient";
 import { calculateAttendanceRate } from "../utils/attendanceUtils";
+import Loading from "../components/Loading";
 
 export default function Overview() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -193,46 +194,77 @@ export default function Overview() {
     let cancelled = false;
     const fetchClasses = async () => {
       try {
-        let query = supabase
+        // Fetch both lectures and tutorials
+        let lectureQuery = supabase
           .from("course_lecture")
           .select(`
             *,
             users(name),
             enrollment_lecture(id)
           `);
+        let tutorialQuery = supabase
+          .from("course_tutorial")
+          .select(`
+            *,
+            users(name),
+            enrollment_tutorial(id)
+          `);
+          
         if (user.role !== "admin") {
-          query = query.eq("lecturer_id", user.id);
+          lectureQuery = lectureQuery.eq("lecturer_id", user.id);
+          tutorialQuery = tutorialQuery.eq("lecturer_id", user.id);
         }
-        const { data, error } = await query;
+        
+        const [lectureResult, tutorialResult] = await Promise.all([
+          lectureQuery,
+          tutorialQuery
+        ]);
+        
         if (cancelled) return;
-        if (error) {
-          console.error("Supabase fetch error:", error);
-          setUserClasses([]);
-        } else {
-          const classesWithType = (data || []).map(c => ({ ...c, type: "Lecture" }));
-          setUserClasses(classesWithType);
-          
-          // Calculate aggregate stats
-          const classStats = await Promise.all(
-            classesWithType.map(async (classItem) => {
-              const stats = await calculateAttendanceRate(classItem.id, "Lecture");
-              return stats.attendanceRate;
-            })
-          );
-          
-          const validStats = classStats.filter(stat => !isNaN(stat) && stat >= 0);
-          const averageAttendance = validStats.length > 0
-            ? Math.round((validStats.reduce((a, b) => a + b, 0) / validStats.length) * 10) / 10
-            : 0;
-          const classesBelow60 = validStats.filter(stat => stat < 60).length;
-          
-          setAttendanceStats({
-            totalClasses: classesWithType.length,
-            averageAttendance,
-            classesBelow60,
-            loading: false
-          });
+        
+        if (lectureResult.error) {
+          console.error("Supabase fetch error (lectures):", lectureResult.error);
         }
+        if (tutorialResult.error) {
+          console.error("Supabase fetch error (tutorials):", tutorialResult.error);
+        }
+        
+        const lectures = (lectureResult.data || []).map(c => ({ ...c, type: "Lecture" }));
+        const tutorials = (tutorialResult.data || []).map(c => ({ ...c, type: "Tutorial" }));
+        const allClasses = [...lectures, ...tutorials];
+        
+        setUserClasses(allClasses);
+          
+        // Filter to only active classes for stats
+        const activeClasses = allClasses.filter(cls => {
+          const endDate = cls.type === "Lecture" ? cls.lecture_end_date : cls.tutorial_end_date;
+          if (!endDate) return true;
+          const classEndDate = new Date(endDate);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          return classEndDate >= today;
+        });
+        
+        // Calculate aggregate stats
+        const classStats = await Promise.all(
+          activeClasses.map(async (classItem) => {
+            const stats = await calculateAttendanceRate(classItem.id, classItem.type);
+            return stats.attendanceRate;
+          })
+        );
+        
+        const validStats = classStats.filter(stat => !isNaN(stat) && stat >= 0);
+        const averageAttendance = validStats.length > 0
+          ? Math.round((validStats.reduce((a, b) => a + b, 0) / validStats.length) * 10) / 10
+          : 0;
+        const classesBelow60 = validStats.filter(stat => stat < 60).length;
+        
+        setAttendanceStats({
+          totalClasses: activeClasses.length,
+          averageAttendance,
+          classesBelow60,
+          loading: false
+        });
       } catch (err) {
         console.error("Unexpected fetch error:", err);
         if (!cancelled) setUserClasses([]);
@@ -248,6 +280,16 @@ export default function Overview() {
     };
   }, [user?.id, user?.role]);
 
+  // Check if a class is active based on end date
+  const isClassActive = (cls) => {
+    const endDate = cls.lecture_end_date || cls.tutorial_end_date;
+    if (!endDate) return true; // If no end date, consider it active
+    const classEndDate = new Date(endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return classEndDate >= today;
+  };
+
   // Show loading state
  if (!user || isLoading) {
    return (
@@ -255,20 +297,41 @@ export default function Overview() {
        <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
          <Sidebar />
        </div>
-       <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
-         <Box display="flex" justifyContent="center" alignItems="center" height="60vh">
-           <Typography>Loading classes...</Typography>
-         </Box>
+      <main
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
+      >
+         <Loading message="Loading classes..." fullScreen />
        </main>
      </div>
    );
  }
 
-  const filteredClasses = userClasses.filter(
-    (cls) =>
-      cls.course_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      cls.course_code?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredClasses = userClasses
+    .filter(
+      (cls) =>
+        cls.course_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        cls.course_code?.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => {
+      // Active classes first, then archived
+      const aActive = isClassActive(a);
+      const bActive = isClassActive(b);
+      if (aActive !== bActive) return aActive ? -1 : 1;
+
+      const dayA = a.day_of_week ?? 7;
+      const dayB = b.day_of_week ?? 7;
+      
+      if (dayA !== dayB) {
+        return dayA - dayB;
+      }
+      
+      // If same day, sort by start time (handle both lecture and tutorial)
+      const timeA = a.type === "Lecture" ? (a.lecture_start_time || "") : (a.tutorial_start_time || "");
+      const timeB = b.type === "Lecture" ? (b.lecture_start_time || "") : (b.tutorial_start_time || "");
+      return timeA.localeCompare(timeB);
+    });
 
   const inputSx = {
     "& .MuiOutlinedInput-root": {
@@ -290,8 +353,9 @@ export default function Overview() {
       </div>
 
       <main
-        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
-        style={{ minHeight: "100vh" }}
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
       >
         <div>
           <h2
@@ -361,7 +425,7 @@ export default function Overview() {
               onChange={(e, val) => setTab(val)}
               textColor="primary"
               indicatorColor="primary"
-              sx={{ mb: 3 }}
+              sx={{ mb: 3, position: "relative", zIndex: 10 }}
             >
               <Tab label="Classes View" value="classes" sx={{ color: "#0f172a" }} />
               <Tab label="Students View" value="students" sx={{ color: "#0f172a" }} />
@@ -457,7 +521,7 @@ export default function Overview() {
         )}
 
         {tab === "students" && (
-          <div className="gap-[20px] mt-6">
+          <div className="gap-[20px] mt-6" style={{ position: "relative", zIndex: 1 }}>
             <StudentView />
           </div>
         )}

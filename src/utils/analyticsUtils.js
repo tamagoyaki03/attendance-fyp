@@ -7,7 +7,7 @@ import supabase from "../config/supabaseClient";
  * 
  * @param {string} startDate - Start date in yyyy-MM-dd format
  * @param {string} endDate - End date in yyyy-MM-dd format
- * @returns {Promise<{totalPossible: number, presentCount: number, lateCount: number, absentCount: number}>}
+ * @returns {Promise<{totalPossible: number, presentCount: number, excusedCount: number, absentCount: number}>}
  */
 export async function calculateAttendanceMetrics(startDate, endDate) {
   try {
@@ -92,15 +92,15 @@ export async function calculateAttendanceMetrics(startDate, endDate) {
     }
 
     const presentCount = attendanceRecords.filter(
-      (r) => r.status === "present" || r.status === "excused"
+      (r) => r.status === "present"
     ).length;
-    const lateCount = attendanceRecords.filter((r) => r.status === "late").length;
-    const absentCount = Math.max(totalPossible - presentCount - lateCount, 0);
+    const excusedCount = attendanceRecords.filter((r) => r.status === "excused").length;
+    const absentCount = Math.max(totalPossible - presentCount - excusedCount, 0);
 
     return {
       totalPossible,
       presentCount,
-      lateCount,
+      excusedCount,
       absentCount,
     };
   } catch (error) {
@@ -108,7 +108,7 @@ export async function calculateAttendanceMetrics(startDate, endDate) {
     return {
       totalPossible: 0,
       presentCount: 0,
-      lateCount: 0,
+      excusedCount: 0,
       absentCount: 0,
     };
   }

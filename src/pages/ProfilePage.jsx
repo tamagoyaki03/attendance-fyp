@@ -16,6 +16,7 @@ import {
 } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/Logout";
 import Sidebar from "../components/Sidebar";
+import Loading from "../components/Loading";
 import { useNavigate } from "react-router-dom";
 import supabase from "../config/supabaseClient";
 
@@ -43,7 +44,7 @@ export default function ProfilePage() {
     if (userId) fetchUser();
   }, [userId]);
 
-  if (!user) return <Typography>Loading...</Typography>;
+  if (!user) return <Loading message="Loading profile..." fullScreen />;
 
   const handleLogout = () => setOpenLogout(true);
   const handleLogoutCancel = () => setOpenLogout(false);
@@ -72,8 +73,9 @@ export default function ProfilePage() {
       </div>
 
       <main
-        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
-        style={{ minHeight: "100vh" }}
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
       >
         <div>
           <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>

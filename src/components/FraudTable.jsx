@@ -440,7 +440,7 @@ export default function FraudTable({ searchTerm = "" }) {
                             return <Typography variant="body2" color="text.secondary">Location data not available for this attendance record.</Typography>;
                           }
                           const distance = haversineDistance(checkLat, checkLng, classLat, classLng);
-                          const isWithinRange = distance <= 0.5;
+                          const isWithinRange = distance <= 0.1;
                           // Use LocationOn for class, MyLocation for check-in
                           return <>
                             <Box display="flex" alignItems="center" gap={1} mb={1}>

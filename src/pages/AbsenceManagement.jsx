@@ -10,8 +10,6 @@ import {
   Button,
   TextField,
   InputAdornment,
-  Snackbar,
-  Alert,
   MenuItem,
   CircularProgress,
 } from "@mui/material";
@@ -22,6 +20,7 @@ import {
   Cancel,
   ContentPaste,
 } from "@mui/icons-material";
+import Toast from "../components/Toast";
 import Sidebar from "../components/Sidebar";
 import MCSubmissions from "../components/MCSubmission";
 import LeaveRequestList from "../components/LeaveRequestList";
@@ -444,7 +443,11 @@ export default function AbsenceManagement() {
         <Sidebar />
       </div>
 
-      <main className="ml-[250px] p-[40px] max-h-screen overflow-y-auto" style={{ minHeight: "100vh" }}>
+      <main
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
+      >
         <div>
           <h2 className="text-[24px] font-inter font-semibold leading-[30px] text-left" style={{ color: "#0f172a", marginBottom: 0 }}>
             Absence Management
@@ -456,7 +459,7 @@ export default function AbsenceManagement() {
           </div>
         </div>
 
-        <Box sx={{ borderBottom: 1, borderColor: "#e5e7eb", mt: 1}}>
+        <Box sx={{ borderBottom: 1, borderColor: "#e5e7eb", mt: 1, position: "relative", zIndex: 10 }}>
           <Tabs value={activeTab} onChange={handleTabChange} textColor="primary" indicatorColor="primary">
             <Tab label={<Box display="flex" alignItems="center"><Cancel fontSize="small" sx={{ mr: 1 }} /> Absences</Box>} />
             <Tab label={<Box display="flex" alignItems="center"><FileCopy fontSize="small" sx={{ mr: 1 }} /> MC Submissions</Box>} />
@@ -592,11 +595,13 @@ export default function AbsenceManagement() {
           </Card>
         )}
 
-        <Snackbar open={snackbar.open} autoHideDuration={3000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-            {snackbar.message}
-          </Alert>
-        </Snackbar>
+        <Toast
+          open={snackbar.open}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          message={snackbar.message}
+          severity={snackbar.severity}
+          autoHideDuration={3000}
+        />
       </main>
     </div>
   );

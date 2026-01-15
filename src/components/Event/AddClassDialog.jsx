@@ -15,13 +15,16 @@ import {
   Tooltip,
   Alert,
   CircularProgress,
-  Typography
+  Typography,
+  Autocomplete
 } from "@mui/material";
 import ScheduleInput from "../ScheduleInput";
 import StudentSearch from "./StudentSearch";
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import { getCurrentLocation, geocodeAddress } from "../../utils/geolocationUtils";
+import LocationPicker from "../LocationPicker";
+import ConflictDialog from "../ConflictDialog";
 
 const DAY_TO_NUMBER = {
   Monday: 1,
@@ -31,12 +34,132 @@ const DAY_TO_NUMBER = {
   Friday: 5,
 };
 
+// Helper function to check if two time ranges overlap
+const timeRangesOverlap = (start1, end1, start2, end2) => {
+  // Convert time strings (HH:MM:SS or HH:MM) to minutes
+  const toMinutes = (time) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  
+  const start1Min = toMinutes(start1);
+  const end1Min = toMinutes(end1);
+  const start2Min = toMinutes(start2);
+  const end2Min = toMinutes(end2);
+  
+  // Check if ranges overlap
+  return start1Min < end2Min && start2Min < end1Min;
+};
+
+// Helper function to check for time conflicts
+// eslint-disable-next-line no-unused-vars
+const checkTimeConflicts = async (studentIds, dayOfWeek, startTime, endTime, isLecture) => {
+  const conflicts = [];
+  
+  for (const studentId of studentIds) {
+    // Get all enrollments for this student
+    const [{ data: lectureEnrollments }, { data: tutorialEnrollments }] = await Promise.all([
+      supabase
+        .from('enrollment_lecture')
+        .select(`
+          id,
+          course_id,
+          course:course_lecture (
+            id,
+            course_code,
+            course_title,
+            day_of_week,
+            lecture_start_time,
+            lecture_end_time
+          )
+        `)
+        .eq('student_id', studentId),
+      supabase
+        .from('enrollment_tutorial')
+        .select(`
+          id,
+          tutorial_id,
+          tutorial:course_tutorial (
+            id,
+            course_code,
+            course_title,
+            day_of_week,
+            tutorial_start_time,
+            tutorial_end_time
+          )
+        `)
+        .eq('student_id', studentId)
+    ]);
+    
+    // Check lecture enrollments for conflicts
+    if (lectureEnrollments) {
+      for (const enrollment of lectureEnrollments) {
+        const course = enrollment.course;
+        if (course && 
+            course.day_of_week === dayOfWeek && 
+            course.lecture_start_time && 
+            course.lecture_end_time &&
+            timeRangesOverlap(startTime, endTime, course.lecture_start_time, course.lecture_end_time)) {
+          // Get student name
+          const { data: userData } = await supabase
+            .from('users')
+            .select('name')
+            .eq('id', studentId)
+            .single();
+          
+          conflicts.push({
+            studentId,
+            studentName: userData?.name || 'Unknown',
+            conflictingClass: `${course.course_code} - ${course.course_title}`,
+            conflictingTime: `${course.lecture_start_time.substring(0, 5)} - ${course.lecture_end_time.substring(0, 5)}`
+          });
+          break;
+        }
+      }
+    }
+    
+    // Check tutorial enrollments for conflicts (if not already found a conflict)
+    if (tutorialEnrollments && !conflicts.some(c => c.studentId === studentId)) {
+      for (const enrollment of tutorialEnrollments) {
+        const tutorial = enrollment.tutorial;
+        if (tutorial && 
+            tutorial.day_of_week === dayOfWeek && 
+            tutorial.tutorial_start_time && 
+            tutorial.tutorial_end_time &&
+            timeRangesOverlap(startTime, endTime, tutorial.tutorial_start_time, tutorial.tutorial_end_time)) {
+          // Get student name
+          const { data: userData } = await supabase
+            .from('users')
+            .select('name')
+            .eq('id', studentId)
+            .single();
+          
+          conflicts.push({
+            studentId,
+            studentName: userData?.name || 'Unknown',
+            conflictingClass: `${tutorial.course_code} - ${tutorial.course_title}`,
+            conflictingTime: `${tutorial.tutorial_start_time.substring(0, 5)} - ${tutorial.tutorial_end_time.substring(0, 5)}`
+          });
+          break;
+        }
+      }
+    }
+  }
+  
+  return conflicts;
+};
+
 export default function AddClassDialog({ open, onClose, onClassAdded }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [validationErrors, setValidationErrors] = useState({});
   const [touched, setTouched] = useState({});
+  const [openLocationPicker, setOpenLocationPicker] = useState(false);
+  const [lecturerConflict, setLecturerConflict] = useState(null);
+  const [openLecturerConflictDialog, setOpenLecturerConflictDialog] = useState(false);
+  const [studentConflicts, setStudentConflicts] = useState([]);
+  const [openStudentConflictDialog, setOpenStudentConflictDialog] = useState(false);
   const [formData, setFormData] = useState({
     code: "",
     name: "",
@@ -342,12 +465,8 @@ const handleGeocodeLocation = async () => {
     const newEnd = formData.end_time;
 
     for (const existingClass of allClasses) {
-      // Check if times overlap
-      if (
-        (newStart >= existingClass.start && newStart < existingClass.end) ||
-        (newEnd > existingClass.start && newEnd <= existingClass.end) ||
-        (newStart <= existingClass.start && newEnd >= existingClass.end)
-      ) {
+      // Check if times overlap using timeRangesOverlap function
+      if (timeRangesOverlap(newStart, newEnd, existingClass.start, existingClass.end)) {
         return existingClass;
       }
     }
@@ -373,6 +492,12 @@ const handleGeocodeLocation = async () => {
       location: true,
     });
 
+    // Check if location is not online and coordinates are missing
+    if (formData.location && formData.location.toLowerCase() !== 'online' && (!formData.latitude || !formData.longitude)) {
+      alert('Please save coordinates for this location. Click the location icon to geocode or use "Get my location".');
+      return;
+    }
+
     // Validate all fields
     const errors = validateForm();
     setValidationErrors(errors);
@@ -383,16 +508,36 @@ const handleGeocodeLocation = async () => {
 
     setIsLoading(true);
 
-    // Check for lecturer scheduling conflicts
+    const dayNumber = DAY_TO_NUMBER[formData.day];
+
+    // Check for lecturer scheduling conflicts FIRST
     const conflict = await checkLecturerConflict();
     if (conflict) {
-      alert(`Scheduling conflict! This lecturer is already assigned to ${conflict.type}: ${conflict.code} - ${conflict.title} on ${formData.day} from ${conflict.start} to ${conflict.end}.`);
+      setLecturerConflict(conflict);
+      setOpenLecturerConflictDialog(true);
       setIsLoading(false);
       return;
     }
 
+    // Check for student time conflicts BEFORE creating the course
+    if (formData.students && formData.students.length > 0) {
+      const conflictingStudents = await checkTimeConflicts(
+        formData.students.map(s => s.id),
+        dayNumber,
+        formData.start_time,
+        formData.end_time,
+        formData.type === "Lecture"
+      );
+
+      if (conflictingStudents.length > 0) {
+        setStudentConflicts(conflictingStudents);
+        setOpenStudentConflictDialog(true);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     try {
-      const dayNumber = DAY_TO_NUMBER[formData.day];
 
       let payload;
       let courseTable, enrollmentTable;
@@ -612,11 +757,11 @@ const handleGeocodeLocation = async () => {
 
             <Box sx={{ gridColumn: "1 / -1" }}>
               <InputLabel htmlFor="location" sx={{ mb: 1 }}>Location</InputLabel>
-              <Box display="flex" gap={1}>
+              <Box display="flex" gap={1} alignItems="flex-start">
                 <TextField 
                   id="location" 
                   name="location" 
-                  placeholder="e.g., Room 101" 
+                  placeholder="e.g., Room 101, Building A" 
                   value={formData.location} 
                   onChange={handleInputChange} 
                   fullWidth 
@@ -632,6 +777,7 @@ const handleGeocodeLocation = async () => {
                    latitude: null, 
                    longitude: null 
                  }))}
+                 sx={{ whiteSpace: 'nowrap' }}
                >
                  Online
                </Button>
@@ -653,12 +799,33 @@ const handleGeocodeLocation = async () => {
                    {isGettingLocation ? <CircularProgress size={20} /> : <MyLocationIcon />}
                  </IconButton>
                </Tooltip>
+               <Tooltip title="Select location on map">
+                 <IconButton
+                   onClick={() => setOpenLocationPicker(true)}
+                   disabled={formData.location.toLowerCase() === 'online'}
+                   color="info"
+                   sx={{ 
+                     backgroundColor: '#e3f2fd',
+                     '&:hover': { backgroundColor: '#bbdefb' }
+                   }}
+                 >
+                   📍
+                 </IconButton>
+               </Tooltip>
               </Box>
+             
+             {formData.location && formData.location.toLowerCase() !== 'online' && !formData.latitude && (
+               <Box sx={{ mt: 1, p: 1, backgroundColor: '#fff3cd', borderRadius: 1, border: '1px solid #ffc107' }}>
+                 <Typography variant="caption" color="error">
+                   ⚠️ Coordinates required for physical locations. Click the location icon to save coordinates.
+                 </Typography>
+               </Box>
+             )}
              
              {formData.latitude && formData.longitude && formData.location.toLowerCase() !== 'online' && (
                <Box sx={{ mt: 1, p: 1, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
-                 <Typography variant="caption" color="text.secondary">
-                   Coordinates: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
+                 <Typography variant="caption" color="success" sx={{ fontWeight: 'bold' }}>
+                   ✓ Coordinates: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
                  </Typography>
                </Box>
              )}
@@ -702,6 +869,42 @@ const handleGeocodeLocation = async () => {
           </DialogActions>
         </form>
       </DialogContent>
+
+      <LocationPicker
+        open={openLocationPicker}
+        onClose={() => setOpenLocationPicker(false)}
+        onLocationSelect={(selectedLocation) => {
+          setFormData({
+            ...formData,
+            location: formData.location || selectedLocation.location,
+            latitude: selectedLocation.latitude,
+            longitude: selectedLocation.longitude
+          });
+          setLocationStatus('✓ Coordinates set from map selection');
+        }}
+        initialLocation={formData.location}
+        initialPosition={formData.latitude && formData.longitude ? { latitude: formData.latitude, longitude: formData.longitude } : null}
+      />
+
+      <ConflictDialog
+        open={openLecturerConflictDialog}
+        onClose={() => setOpenLecturerConflictDialog(false)}
+        type="lecturer"
+        conflicts={lecturerConflict}
+        day={formData.day}
+        startTime={formData.start_time}
+        endTime={formData.end_time}
+      />
+
+      <ConflictDialog
+        open={openStudentConflictDialog}
+        onClose={() => setOpenStudentConflictDialog(false)}
+        type="student"
+        conflicts={studentConflicts}
+        day={formData.day}
+        startTime={formData.start_time}
+        endTime={formData.end_time}
+      />
     </Dialog>
   );
 }

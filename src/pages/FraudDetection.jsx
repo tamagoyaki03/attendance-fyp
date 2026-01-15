@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import Snackbar from '@mui/material/Snackbar';
-import MuiAlert from '@mui/material/Alert';
+import Toast from '../components/Toast';
 import {
   Box,
   Card,
@@ -124,8 +123,9 @@ export default function FraudDetection() {
       </div>
 
       <main
-        className="ml-[250px] p-[40px] max-h-screen overflow-y-auto"
-        style={{ minHeight: "100vh" }}
+        data-has-sidebar
+        className="p-[40px] max-h-screen overflow-y-auto"
+        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
       >
         <div>
           <h2
@@ -156,7 +156,7 @@ export default function FraudDetection() {
                     type="number"
                     value={distance === null ? "" : distance}
                     onChange={handleDistanceChange}
-                    inputProps={{ min: 0.1, max: 1.0, step: 0.1 }}
+                    inputProps={{ min: 0.05, max: 1.0, step: 0.05 }}
                     size="small"
                     sx={{ flex: 1, "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }}
                     disabled={distance === null}
@@ -204,11 +204,13 @@ export default function FraudDetection() {
           </Button>
         </Box>
 
-        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          <MuiAlert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
-            {snackbar.message}
-          </MuiAlert>
-        </Snackbar>
+        <Toast
+          open={snackbar.open}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          message={snackbar.message}
+          severity={snackbar.severity}
+          autoHideDuration={4000}
+        />
 
         <Card sx={{ mt: 4, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 6px 18px rgba(15,23,42,0.04)" }}>
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", p: 2 }}>

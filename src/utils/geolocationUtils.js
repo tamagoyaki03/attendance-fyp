@@ -59,3 +59,30 @@ export const geocodeAddress = async (address) => {
     throw error;
   }
 };
+
+// Search for location suggestions
+export const searchLocations = async (query) => {
+  try {
+    if (!query || query.trim().length < 3) {
+      return [];
+    }
+    
+    // Using OpenStreetMap Nominatim API for location search
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`
+    );
+    const data = await response.json();
+    
+    if (data && data.length > 0) {
+      return data.map(item => ({
+        label: item.display_name,
+        latitude: parseFloat(item.lat),
+        longitude: parseFloat(item.lon)
+      }));
+    }
+    return [];
+  } catch (error) {
+    console.error('Location search error:', error);
+    return [];
+  }
+};

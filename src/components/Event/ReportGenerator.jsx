@@ -10,12 +10,11 @@ import {
   InputLabel,
   FormControl,
   Button,
-  Snackbar,
-  Alert,
   Box,
 } from "@mui/material";
 import FileTextIcon from "@mui/icons-material/Description";
 import DownloadIcon from "@mui/icons-material/Download";
+import Toast from "../Toast";
 import supabase from "../../config/supabaseClient";
 
 export default function ReportGenerator() {
@@ -86,7 +85,8 @@ export default function ReportGenerator() {
 
       const rows = (data.enrollments || []).map((en) => {
         const name = en.users?.name || en.student_id;
-        const row = { Student: name };
+        const matricNumber = en.users?.matric_number || '';
+        const row = { Student: name, 'Matric Number': matricNumber };
         sessions.forEach((s) => {
           const key = `${s.id}-${en.id}`;
           row[s.date || s.start_time || s.id] = statusByKey.get(key) || "absent";
@@ -241,7 +241,7 @@ export default function ReportGenerator() {
           const enrollmentCourseField = lecture ? "course_id" : "tutorial_id";
           const { data: enrollments, error: enrollErr } = await supabase
             .from(enrollmentTable)
-            .select("id, student_id, users(name)")
+            .select("id, student_id, users(name, matric_number)")
             .eq(enrollmentCourseField, course.id);
           if (enrollErr) throw enrollErr;
 
@@ -383,7 +383,7 @@ export default function ReportGenerator() {
         <CardHeader
           sx={{ pb: 0 }}
           title={<Typography variant="h6" fontWeight="bold" color="text.primary">Generate Custom Reports</Typography>}
-          subheader={<Typography variant="body2" color="text.secondary">Generate and download detailed reports by attendance session, class, or student.</Typography>}
+          subheader={<Typography variant="body2" color="text.secondary">Generate and download detailed reports by class or student.</Typography>}
         />
         <CardContent>
           <Box display="flex" flexDirection={{ xs: "column", md: "row" }} gap={2} mb={3}>
@@ -441,19 +441,13 @@ export default function ReportGenerator() {
         </CardContent>
       </Card>
 
-      <Snackbar
+      <Toast
         open={snackbar.open}
-        autoHideDuration={3000}
         onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert
-          severity={snackbar.severity}
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          sx={{ width: "100%" }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
+        message={snackbar.message}
+        severity={snackbar.severity}
+        autoHideDuration={3000}
+      />
     </>
   );
 }
