@@ -53,7 +53,7 @@ export default function FraudReportsTab() {
             setUsersMap(map);
           }
         }
-      } catch (err) {
+      } catch {
         setRows([]);
       } finally {
         setLoading(false);
@@ -68,7 +68,7 @@ export default function FraudReportsTab() {
       await supabase.from("attendance_issues").update({ status: "resolved" }).eq("id", rowId);
       setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, status: "resolved" } : r)));
       setSnackbar({ open: true, message: `Marked resolved for ${studentName}.`, severity: "success" });
-    } catch (err) {
+    } catch {
       setSnackbar({ open: true, message: err.message || "Failed to update", severity: "error" });
     }
   };

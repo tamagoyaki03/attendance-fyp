@@ -107,7 +107,7 @@ export default function LoginPage() {
         setMessage("Login successful!");
         setTimeout(() => navigate("/dashboard"), 800);
       }
-    } catch (err) {
+    } catch {
       setIsLoading(false);
       setMessage("An unexpected error occurred.");
     }

@@ -103,7 +103,7 @@ export async function calculateAttendanceMetrics(startDate, endDate) {
       excusedCount,
       absentCount,
     };
-  } catch (error) {
+  } catch {
     return {
       totalPossible: 0,
       presentCount: 0,

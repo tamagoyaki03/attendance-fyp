@@ -44,6 +44,7 @@ export default function ClassAttendance({ classes }) {
   };
 
   const isClassActive = (cls) => {
+    if (!cls) return false; // Safety check for undefined/null
     const endDate = cls.lecture_end_date || cls.tutorial_end_date;
     if (!endDate) return true;
     const classEndDate = new Date(endDate);
@@ -110,7 +111,7 @@ export default function ClassAttendance({ classes }) {
         );
 
         setClassesData(classDataWithStats);
-      } catch (error) {
+      } catch {
         setClassesData([]);
       } finally {
         setIsInitialLoading(false);
@@ -139,7 +140,8 @@ export default function ClassAttendance({ classes }) {
             ...prev,
             [classItem.id]: detailedStats,
           }));
-        } catch (error) {
+        } catch {
+          // Error already handled by component state
         } finally {
           setLoadingStates((prev) => ({ ...prev, [classItem.id]: false }));
         }
@@ -167,8 +169,14 @@ export default function ClassAttendance({ classes }) {
   }
 
   // Separate active and archived classes
-  const activeClasses = classesData.filter(item => isClassActive(classes.find(c => c.id === item.id)));
-  const archivedClasses = classesData.filter(item => !isClassActive(classes.find(c => c.id === item.id)));
+  const activeClasses = classesData.filter(item => {
+    const classObj = classes.find(c => c.id === item.id);
+    return classObj && isClassActive(classObj);
+  });
+  const archivedClasses = classesData.filter(item => {
+    const classObj = classes.find(c => c.id === item.id);
+    return classObj && !isClassActive(classObj);
+  });
 
   return (
     <Box display="flex" flexDirection="column" gap={2}>

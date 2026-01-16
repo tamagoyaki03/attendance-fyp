@@ -63,7 +63,7 @@ export default function FraudDetectionChart({ timeRange = "30days" }) {
           attempts: attemptsByDate[format(day, 'MMM d')] || 0
         }));
         setFraudData(chartData);
-      } catch (error) {
+      } catch {
         setFraudData([]);
       } finally {
         setLoading(false);

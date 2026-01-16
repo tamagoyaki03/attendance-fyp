@@ -232,7 +232,8 @@ export default function LeaveRequestList({ onChanged }) {
           }
         }
       }
-    } catch (e) {
+    } catch {
+      // Error approving leave request handled silently
     } finally {
       setRequests((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: "approved" } : r))
@@ -260,7 +261,8 @@ export default function LeaveRequestList({ onChanged }) {
       if (error) {
         // Error handling
       }
-    } catch (e) {
+    } catch {
+      // Error rejecting leave request handled silently
     } finally {
       setRequests((prev) =>
         prev.map((r) =>

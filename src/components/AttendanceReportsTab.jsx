@@ -149,8 +149,8 @@ export default function AttendanceReportsTab() {
         });
 
         setRows(summaries);
-      } catch (err) {
-        setError(err.message || "Failed to load attendance reports");
+      } catch (catchErr) {
+        setError(catchErr.message || "Failed to load attendance reports");
         setRows([]);
       } finally {
         setLoading(false);

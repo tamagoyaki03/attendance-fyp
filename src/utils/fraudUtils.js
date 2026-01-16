@@ -100,7 +100,6 @@ async function upsertIssue({
   distanceKm,
   expectedTime,
   actualTime,
-  severity = "medium",
 }) {
   // Prevent duplicates per user-session-type
   const { data: existing } = await supabase
@@ -150,7 +149,7 @@ async function upsertIssue({
 
 async function analyzeRecord(sessionId, record, ctx, opts) {
   const issues = [];
-  const { classInfo, courseCode, enrollmentMap, start, end } = ctx;
+  const { classInfo, enrollmentMap, start, end } = ctx;
   const { maxKm = 1.0, timeBufferMinutes = 5 } = opts || {};
 
 
@@ -173,7 +172,6 @@ async function analyzeRecord(sessionId, record, ctx, opts) {
     
     if (!error && data) {
       userId = data.student_id;
-    } else {
     }
   }
 
@@ -201,9 +199,7 @@ async function analyzeRecord(sessionId, record, ctx, opts) {
         description: `Check-in ${distance.toFixed(2)} km away from class location.`,
       });
       reasons.push(`Far from class: ${distance.toFixed(2)}km`);
-    } else {
     }
-  } else {
   }
 
   // Time anomaly detection
@@ -265,17 +261,13 @@ async function analyzeRecord(sessionId, record, ctx, opts) {
   if (reasons.length && record?.id) {
     const reasonText = reasons.join("\n");
     try {
-      const { data, error } = await supabase
+      await supabase
         .from("attendance_record")
         .update({ status: "flagged", flag_reason: reasonText })
         .eq("id", record.id);
-      
-      if (error) {
-      } else {
-      }
-    } catch (flagErr) {
+    } catch {
+      // Error handled silently
     }
-  } else {
   }
   
 
@@ -288,7 +280,7 @@ export async function startFraudMonitoring(sessionId, options = {}) {
     const ctx = await getSessionContext(sessionId);
 
     // Analyze existing records once (in case some inserted before monitor starts)
-    const { data: existing, error: existingError } = await supabase
+    const { data: existing } = await supabase
       .from("attendance_record")
       .select("id, session_id, created_at, latitude, longitude, status, lecture_enrollment_id, tutorial_enrollment_id")
       .eq("session_id", sessionId);
@@ -313,17 +305,12 @@ export async function startFraudMonitoring(sessionId, options = {}) {
           await analyzeRecord(sessionId, rec, ctx, options);
         }
       )
-      .subscribe((status, err) => {
-        if (err) {
-        }
-        if (status === 'SUBSCRIBED') {
-        } else if (status === 'CHANNEL_ERROR') {
-        } else if (status === 'TIMED_OUT') {
-        }
+      .subscribe(() => {
+        // Subscription status handled silently
       });
 
     return channel;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -332,6 +319,7 @@ export async function stopFraudMonitoring(channel) {
   if (!channel) return;
   try {
     await supabase.removeChannel(channel);
-  } catch (e) {
+  } catch {
+    // Error handled silently
   }
 }

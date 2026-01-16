@@ -134,7 +134,7 @@ export default function AnalyticsPage() {
       const dateRange = getDateRange();
       
       
-      const { data: fraudData, error: fraudError } = await supabase
+      const { data: fraudData } = await supabase
         .from("fraud_detection_alerts")
         .select("id, created_at, status")
         .gte("created_at", dateRange.start);
@@ -204,7 +204,8 @@ export default function AnalyticsPage() {
       } else {
         setFraudByMethod([]);
       }
-    } catch (error) {
+    } catch {
+      // Error fetching analytics data handled silently
     } finally {
       setIsLoading(false);
     }

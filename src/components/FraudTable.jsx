@@ -236,7 +236,7 @@ export default function FraudTable({ searchTerm = "" }) {
       } else {
         setActionSnack({ open: true, message: 'Email sent to student.', severity: 'success' });
       }
-    } catch (e) {
+    } catch {
       setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
     }
   };

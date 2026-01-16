@@ -133,7 +133,7 @@ const ManageClasses = () => {
 
       setClasses(merged);
       setFetchError(null);
-    } catch (error) {
+    } catch {
       setFetchError("Could not fetch classes");
       setClasses([]);
     } finally {
@@ -191,7 +191,7 @@ const ManageClasses = () => {
       
       fetchClasses();
       setDeleteDialog({ open: false, classItem: null });
-    } catch (error) {
+    } catch {
       alert("An error occurred while deleting the class. Some enrollments with attendance records cannot be removed.");
       setDeleteDialog({ open: false, classItem: null });
     }

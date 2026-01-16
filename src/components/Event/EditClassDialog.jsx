@@ -179,8 +179,7 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
           .select("id, name")
           .eq("role", "lecturer");
         
-        if (lecturerError) {
-        } else {
+        if (!lecturerError) {
           setLecturers(lecturerData || []);
         }
 
@@ -190,11 +189,11 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
           .select("id, name")
           .eq("role", "student");
         
-        if (studentError) {
-        } else {
+        if (!studentError) {
           setAllStudents(studentData || []);
         }
-      } catch (error) {
+      } catch {
+        // Error handled silently
       }
     };
     
@@ -266,7 +265,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
 
       const enrolledStudents = enrollments.map(enrollment => enrollment.users);
       setFormData(prev => ({ ...prev, students: enrolledStudents }));
-    } catch (error) {
+    } catch {
+      // Error handled by component state
     }
   };
 
@@ -289,8 +289,8 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       }));
       setLocationStatus('Current location obtained successfully!');
       setTimeout(() => setLocationStatus(''), 3000);
-    } catch (error) {
-      setLocationStatus(`Error: ${error.message}`);
+    } catch (err) {
+      setLocationStatus(`Error: ${err.message}`);
       setTimeout(() => setLocationStatus(''), 5000);
     } finally {
       setIsGettingLocation(false);
@@ -322,7 +322,7 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       }));
       setLocationStatus('Location coordinates found!');
       setTimeout(() => setLocationStatus(''), 3000);
-    } catch (error) {
+    } catch {
       setLocationStatus('Could not find coordinates for this location');
       setTimeout(() => setLocationStatus(''), 5000);
     } finally {
@@ -369,7 +369,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       setTimeout(() => {
         document.activeElement?.blur?.();
       }, 100);
-    } else {
     }
   };
 
@@ -601,7 +600,7 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       setIsLoading(false);
       if (onClassAdded) onClassAdded();
       handleClose();
-    } catch (error) {
+    } catch {
       setIsLoading(false);
       alert("An error occurred while updating the class. Please try again.");
     }

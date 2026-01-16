@@ -39,24 +39,20 @@ export const getCurrentLocation = () => {
 };
 
 export const geocodeAddress = async (address) => {
-  try {
-    // Using OpenStreetMap Nominatim API (free alternative to Google Maps)
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
-    );
-    const data = await response.json();
-    
-    if (data && data.length > 0) {
-      return {
-        latitude: parseFloat(data[0].lat),
-        longitude: parseFloat(data[0].lon),
-        display_name: data[0].display_name
-      };
-    }
-    throw new Error('Location not found');
-  } catch (error) {
-    throw error;
+  // Using OpenStreetMap Nominatim API (free alternative to Google Maps)
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`
+  );
+  const data = await response.json();
+  
+  if (data && data.length > 0) {
+    return {
+      latitude: parseFloat(data[0].lat),
+      longitude: parseFloat(data[0].lon),
+      display_name: data[0].display_name
+    };
   }
+  throw new Error('Location not found');
 };
 
 // Search for location suggestions
@@ -80,7 +76,7 @@ export const searchLocations = async (query) => {
       }));
     }
     return [];
-  } catch (error) {
+  } catch {
     return [];
   }
 };

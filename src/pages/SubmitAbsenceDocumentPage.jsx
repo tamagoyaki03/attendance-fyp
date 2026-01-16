@@ -80,11 +80,13 @@ export default function SubmitAbsenceDocumentPage() {
               const courseInfo = `${data.course_lecture.course_code} - ${data.course_lecture.course_title}`;
               setCourse(courseInfo);
             }
-          } catch (err) {
+          } catch {
+            // Error fetching session info handled silently
           }
         })();
       }
-    } catch (e) {
+    } catch {
+      // Error parsing URL params handled silently
     }
 
     // Auto-fill from Supabase auth ONLY if user is a student (not lecturer/admin)
@@ -106,7 +108,8 @@ export default function SubmitAbsenceDocumentPage() {
           if (!hasSid && inferredId) setStudentId(inferredId);
           if (!hasSname && inferredName) setStudentName(inferredName);
         }
-      } catch (e) {
+      } catch {
+        // Error fetching user info handled silently
       }
     })();
   }, []);
@@ -209,7 +212,7 @@ export default function SubmitAbsenceDocumentPage() {
       setAbsenceDate(null);
       setReason("");
       setDocumentFile(null);
-    } catch (error) {
+    } catch {
       toast.error("An error occurred. Please try again.");
     } finally {
       setIsSubmitting(false);

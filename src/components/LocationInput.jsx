@@ -29,7 +29,7 @@ const LocationInput = ({ formData, setFormData }) => {
             long: parseFloat(loc.lon),
           }))
         );
-      } catch (err) {
+      } catch {
       } finally {
         setLoading(false);
       }

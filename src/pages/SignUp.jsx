@@ -163,7 +163,7 @@ export default function SignupPage() {
         setShowOtpInput(true);
         setMessage("A verification code has been sent to your email. Please enter it below.");
       }
-    } catch (err) {
+    } catch {
       setIsLoading(false);
       setMessage("Network error. Please check your connection and try again.");
     }

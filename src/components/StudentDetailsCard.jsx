@@ -48,7 +48,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
         if (!error && settings?.time_buffer_minutes) {
           setTimeBufferMinutes(settings.time_buffer_minutes);
         }
-      } catch (err) {
+      } catch {
         // Use default value if fetch fails
       }
     };
@@ -173,7 +173,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
         });
 
        setAttendanceHistory(formattedHistory);
-     } catch (error) {
+     } catch {
        // Set empty array on error
        setAttendanceHistory([]);
      } finally {
@@ -181,7 +181,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
      }
    };
    fetchAttendanceHistory();
- }, [student?.enrollmentId, open, student?.classType, classData]);
+ }, [student?.enrollmentId, open, student?.classType, classData, student?.student_id]);
 
   // Subscribe to real-time updates for attendance_record changes (fraud flagging)
   useEffect(() => {
@@ -255,7 +255,8 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
 
                 setAttendanceHistory(formattedHistory);
               }
-            } catch (error) {
+            } catch {
+              // Error in realtime update handled silently
             }
           })();
         }
@@ -265,7 +266,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [student?.enrollmentId, open, student?.classType, classData.id]);
+  }, [student?.enrollmentId, open, student?.classType, classData.id, student?.attendanceRecord?.id]);
 
  if (!student || !open) {
     return null;
@@ -456,7 +457,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
      // Download file
      XLSX.writeFile(wb, filename);
 
-   } catch (error) {
+   } catch {
      alert("Failed to generate report. Please try again.");
    } finally {
      setIsGeneratingReport(false);

@@ -82,7 +82,7 @@ export const sendAbsenceNotificationEmails = async (
     const DEMO_MODE = false; // Changed to false for real email sending
     
     if (DEMO_MODE) {
-      emailsToSend.forEach((email, index) => {
+      emailsToSend.forEach(() => {
       });
       
       // Logging is now handled by the caller (sendAbsenceAfterLectureEnd.js)
@@ -106,7 +106,7 @@ export const sendAbsenceNotificationEmails = async (
 
     if (error) {
       // Fallback: log to console if Edge Function fails
-      emailsToSend.forEach(email => {
+      emailsToSend.forEach(() => {
       });
       
       return {
@@ -119,7 +119,7 @@ export const sendAbsenceNotificationEmails = async (
 
     
     if (data.failedEmails && data.failedEmails.length > 0) {
-      data.failedEmails.forEach((failedEmail, index) => {
+      data.failedEmails.forEach(() => {
       });
     }
 
@@ -131,13 +131,13 @@ export const sendAbsenceNotificationEmails = async (
       failedEmails: data.failedEmails, // Include failed details for debugging
     };
 
-  } catch (error) {
+  } catch (catchErr) {
     return {
       success: false,
       sentCount: 0,
       failedCount: absentStudents.length,
-      message: "Error sending absence notification emails: " + error.message,
-      error: error.message,
+      message: "Error sending absence notification emails: " + catchErr.message,
+      error: catchErr.message,
     };
   }
 };
@@ -187,7 +187,7 @@ Thank you,
       emailTiming: "immediate",
       reminderFrequency: "3days",
     };
-  } catch (error) {
+  } catch {
     return {
       emailTemplate: `Dear [Student Name],
 

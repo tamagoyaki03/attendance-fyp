@@ -151,7 +151,7 @@ export default function StudentView() {
       const rate = totalConsidered > 0 ? Math.round((present / totalConsidered) * 100) : 0;
       setAttendanceRate(rate);
       setTotalSessions(records.length || null);
-    } catch (err) {
+    } catch {
       setAttendanceRate(null);
       setTotalSessions(null);
     } finally {

@@ -64,7 +64,7 @@ export const calculateAttendanceRate = async (classId, classType) => {
       totalPossibleAttendance
     };
 
-  } catch (error) {
+  } catch {
     return { attendanceRate: 0, totalStudents: 0, totalSessions: 0 };
   }
 };
@@ -158,13 +158,10 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
     const totalWeekSessions = weekSessions?.length || 0;
 
     // Get ALL attendance sessions for overall rate calculation
-    const { data: allSessions, error: allSessionsError } = await supabase
+    const { data: allSessions } = await supabase
       .from("attendance_session")
       .select("id")
       .eq(sessionField, classId);
-
-    if (allSessionsError) {
-    }
 
     const totalOverallSessions = allSessions?.length || 0;
 
@@ -181,8 +178,7 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
         .select(`id, ${enrollmentIdField}, status, session_id, flag_reason`)
         .in("session_id", weekSessionIds);
 
-      if (attendanceError) {
-      } else {
+      if (!attendanceError) {
         weekAttendanceRecords = attendanceRecords || [];
         presentCount = weekAttendanceRecords.filter(r => r.status === 'present').length || 0;
         absentCount = weekAttendanceRecords.filter(r => r.status === 'absent').length || 0;
@@ -199,8 +195,7 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
         .select(`status`)
         .in("session_id", allSessionIds);
 
-      if (allAttendanceError) {
-      } else {
+      if (!allAttendanceError) {
         overallAttendanceRecords = allAttendanceRecords || [];
       }
     }
@@ -235,7 +230,7 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
       students
     };
 
-  } catch (error) {
+  } catch {
     return {
       totalStudents: 0,
       presentCount: 0,

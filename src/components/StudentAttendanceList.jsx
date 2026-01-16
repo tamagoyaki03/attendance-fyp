@@ -22,18 +22,14 @@ function extractTime(isoString) {
   return match ? match[1] : isoString;
 }
 
-export default function StudentAttendanceList({ classData, sessionId, onSelectStudent, onFlagged }) {
+export default function StudentAttendanceList({ classData, onSelectStudent, onFlagged }) {
   const [flagReasonDialog, setFlagReasonDialog] = useState({ open: false, student: null });
   const [flagReasonInput, setFlagReasonInput] = useState("");
-  const [studentsState, setStudentsState] = useState(null);
   const [flagError, setFlagError] = useState("");
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [enrolledStudents, setEnrolledStudents] = useState([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-
-  // Show warning if sessionId is missing
-  const showSessionIdWarning = !sessionId;
 
   // Listen for attendance updates
   React.useEffect(() => {
@@ -258,20 +254,8 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
     } else {
       setFlagError('Cannot flag: missing session ID for this student.');
     }
-    // Update local UI state so the student appears as flagged immediately (optional fallback)
-    setStudentsState(prev => {
-      const arr = prev || classData?.students || [];
-      return arr.map(s => {
-        if ((s.id || s.student_id) === (student.id || student.student_id)) {
-          return {
-            ...s,
-            status: 'Flagged',
-            flag_reason: flagReasonInput || 'Flagged by admin',
-          };
-        }
-        return s;
-      });
-    });
+    setFlagReasonDialog({ open: false, student: null });
+    setFlagReasonInput('');
   };
 
   return (

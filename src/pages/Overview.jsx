@@ -142,7 +142,7 @@ export default function Overview() {
           }));
         }
 
-      } catch (error) {
+      } catch {
         // Error fetching notifications
       } finally {
         setLoadingNotifications(false);
@@ -258,7 +258,7 @@ export default function Overview() {
           classesBelow60,
           loading: false
         });
-      } catch (err) {
+      } catch {
         if (!cancelled) setUserClasses([]);
       } finally {
         if (!cancelled) setIsLoading(false);

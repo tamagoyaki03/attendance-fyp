@@ -106,8 +106,7 @@ export default function AbsenceReportsTab() {
             .select("id, status, session_id")
             .in("session_id", sessionIds);
 
-          if (mcErr) {
-          } else {
+          if (!mcErr) {
             mcSubmissions = mcData || [];
           }
         }
@@ -131,15 +130,6 @@ export default function AbsenceReportsTab() {
               (mc) => courseSessionIds.includes(mc.session_id) && mc.status?.toLowerCase() === "approved"
             ).length;
             const unexcused = Math.max(totalAbsences - excused, 0);
-
-            const { data: latestSession } = await supabase
-              .from("attendance_session")
-              .select("date, created_at")
-              .eq(sessionField, course.id)
-              .order("date", { ascending: false })
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .maybeSingle();
 
             const totalStudents = stats.totalStudents || 0;
 
@@ -165,8 +155,8 @@ export default function AbsenceReportsTab() {
         });
 
         setRows(summaries);
-      } catch (err) {
-        setError(err.message || "Failed to load absence reports");
+      } catch (catchErr) {
+        setError(catchErr.message || "Failed to load absence reports");
         setRows([]);
       } finally {
         setLoading(false);

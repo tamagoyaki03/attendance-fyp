@@ -10,7 +10,7 @@ const QRGenerator = ({ courseId, isTutorial = false }) => {
     try {
       await navigator.clipboard.writeText(qrData);
       alert('QR Data copied to clipboard');
-    } catch (err) {
+    } catch {
       alert('Failed to copy QR Data');
     }
   };

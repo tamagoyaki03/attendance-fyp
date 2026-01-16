@@ -95,19 +95,14 @@ export default function TopAbsenceReasons({ timeRange = "30days" }) {
       setLoading(true);
       try {
         // Fetch MC submissions with reasons
-        const { data: mcData, error: mcError } = await supabase
+        const { data: mcData } = await supabase
           .from("mc_submissions")
           .select("id, reason, created_at");
 
         // Fetch leave requests with reasons
-        const { data: leaveData, error: leaveError } = await supabase
+        const { data: leaveData } = await supabase
           .from("leave_requests")
           .select("id, reason, created_at");
-
-        if (mcError) {
-        }
-        if (leaveError) {
-        }
 
         // Collect all reasons from both MC submissions and leave requests
         const reasonCounts = {};
@@ -140,7 +135,7 @@ export default function TopAbsenceReasons({ timeRange = "30days" }) {
         }));
 
         setAbsenceData(absenceDataWithColors);
-      } catch (error) {
+      } catch {
         setAbsenceData([]);
       } finally {
         setLoading(false);

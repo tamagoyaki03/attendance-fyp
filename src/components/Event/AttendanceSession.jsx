@@ -20,7 +20,7 @@ import supabase from "../../config/supabaseClient";
 import { startFraudMonitoring, stopFraudMonitoring } from "../../utils/fraudUtils";
 
 
-import { sendAbsenceEmailsAfterLectureEnd } from "../../utils/sendAbsenceAfterLectureEnd";
+// sendAbsenceEmailsAfterLectureEnd removed - not used in this component
 
 // Helper function to pad numbers with leading zeros
 const pad = (n) => n.toString().padStart(2, '0');
@@ -44,7 +44,7 @@ async function saveSessionPassword(sessionId, password) {
       const endSecond = pad(endDateTime.getSeconds());
 
       // Add timeout to the database query
-      const { error } = await Promise.race([
+      await Promise.race([
         supabase
           .from("attendance_session")
           .update({ 
@@ -59,12 +59,9 @@ async function saveSessionPassword(sessionId, password) {
         )
       ]);
 
-      if (error) {
-      } else {
-      }
-    } catch (error) {
-      if (error.message === 'Query timeout') {
-      }
+      // Query errors handled silently
+    } catch {
+      // Timeout errors handled silently
     }
   }
 }
@@ -81,7 +78,7 @@ async function updateSessionEndTime(sessionId) {
       const endSecond = pad(localDate.getSeconds());
       const endTime = `${endHour}:${endMinute}:${endSecond}`;
 
-      const { error } = await Promise.race([
+      await Promise.race([
         supabase
           .from("attendance_session")
           .update({ 
@@ -93,10 +90,9 @@ async function updateSessionEndTime(sessionId) {
         )
       ]);
       
-      if (error) {
-      } else {
-      }
-    } catch (error) {
+      // Query errors handled silently
+    } catch {
+      // Password save error handled by UI state
     }
   }
 }
@@ -150,7 +146,8 @@ export default function AttendanceSession({
           setIsExpired(true);
         }
       }
-    } catch (e) {
+    } catch {
+      // Error handled silently
     }
   };
 
@@ -204,7 +201,8 @@ useEffect(() => {
                   type = "tutorial";
                 }
               }
-            } catch (error) {
+            } catch {
+              // Error checking tutorial data handled silently
             }
           }
           
@@ -220,14 +218,11 @@ useEffect(() => {
           try {
             if (sessionId) {
               // Fetch admin-configured fraud detection settings
-              const { data: settings, error: settingsError } = await supabase
+              const { data: settings } = await supabase
                 .from("fraud_detection_settings")
                 .select("max_distance_km, time_buffer_minutes")
                 .limit(1)
                 .single();
-              
-              if (settingsError || !settings) {
-              }
               
               const maxKm = settings?.max_distance_km || 1.0;
               const timeBufferMinutes = settings?.time_buffer_minutes || 1;
@@ -235,9 +230,10 @@ useEffect(() => {
               const channel = await startFraudMonitoring(sessionId, { maxKm, timeBufferMinutes });
               fraudChannelRef.current = channel;
             }
-          } catch (e) {
+          } catch {
+            // Error starting fraud monitoring handled silently
           }
-        } catch (error) {
+        } catch {
           const fallbackQrString = `course|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
           setQrValue(fallbackQrString);
         } finally {
@@ -257,7 +253,7 @@ useEffect(() => {
             lng: pos.coords.longitude,
           });
         },
-        (error) => {
+        () => {
           setLocation({ lat: 0, lng: 0 }); // Set default so QR still generates
         }
       );

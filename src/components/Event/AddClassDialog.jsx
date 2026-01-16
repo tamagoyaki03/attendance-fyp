@@ -212,8 +212,8 @@ export default function AddClassDialog({ open, onClose, onClassAdded }) {
      }));
      setLocationStatus('Current location obtained successfully!');
      setTimeout(() => setLocationStatus(''), 3000);
-   } catch (error) {
-     setLocationStatus(`Error: ${error.message}`);
+   } catch (catchErr) {
+     setLocationStatus(`Error: ${catchErr.message}`);
      setTimeout(() => setLocationStatus(''), 5000);
    } finally {
      setIsGettingLocation(false);
@@ -245,7 +245,7 @@ const handleGeocodeLocation = async () => {
     }));
     setLocationStatus('Location coordinates found!');
     setTimeout(() => setLocationStatus(''), 3000);
-  } catch (error) {
+  } catch {
     setLocationStatus('Could not find coordinates for this location');
     setTimeout(() => setLocationStatus(''), 5000);
   } finally {
@@ -623,7 +623,7 @@ const handleGeocodeLocation = async () => {
        onClose(false);
      }
 
-    } catch (error) {
+    } catch {
       alert("An error occurred while adding the class. Please try again.");
     } finally {
       setIsLoading(false);

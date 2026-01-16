@@ -84,7 +84,7 @@ export default function AttendanceIssues({ selectedClass }) {
           }
         }
 
-      } catch (error) {
+      } catch {
         setIssues([]);
       }
     };
@@ -170,7 +170,7 @@ export default function AttendanceIssues({ selectedClass }) {
           : issue
       ));
       setDialogOpen(false);
-    } catch (error) {
+    } catch {
       alert("Failed to update issue status. Please try again.");
     }
   };

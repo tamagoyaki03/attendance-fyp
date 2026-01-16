@@ -518,6 +518,85 @@ export default function AttendanceManagementPage() {
   }
 };
 
+const handleStartAttendance = async () => {
+  const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+
+  // Get class schedule - fix the time field mapping
+  const classDay = selectedClass.day_of_week;
+  const startTime = selectedClass.startTime; 
+  const endTime = selectedClass.endTime; 
+
+  let expectedJsDay;
+  if (typeof classDay === 'number') {
+    // Support both 0-6 (JS) and 1-7 (ISO-style with Sunday=7)
+    expectedJsDay = classDay % 7;
+  } else {
+    const dayMap = {
+      "Sunday": 0,
+      "Monday": 1,
+      "Tuesday": 2,
+      "Wednesday": 3,
+      "Thursday": 4,
+      "Friday": 5,
+      "Saturday": 6,
+    };
+    expectedJsDay = dayMap[classDay] ?? 0;
+  }
+
+  // Check if today is the correct day
+  const isCorrectDay = currentDay === expectedJsDay;
+
+  // Check if current time is within class time (allow 15 minutes before, but stop 20 minutes before end)
+  let isCorrectTime = false;
+  let timeMessage = '';
+
+  if (startTime && endTime) {
+    const [startHour, startMin] = startTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    const [currentHour, currentMin] = currentTime.split(':').map(Number);
+
+    // Convert to minutes for easier comparison
+    const classStartMinutes = startHour * 60 + startMin - 15; // 15 min before start
+    const classEndMinutes = endHour * 60 + endMin; // Exact end time
+    const classEndMinutesMinus20 = classEndMinutes - 20; // 20 min before end
+    const currentMinutes = currentHour * 60 + currentMin;
+
+    // Allow attendance from 15 min before start until 20 min before end
+    // Also prevent starting after class has completely ended
+    isCorrectTime = currentMinutes >= classStartMinutes && currentMinutes < classEndMinutesMinus20;
+
+    if (!isCorrectTime) {
+      if (currentMinutes < classStartMinutes) {
+        const allowedStartTime = new Date();
+        allowedStartTime.setHours(Math.floor(classStartMinutes / 60), classStartMinutes % 60);
+        timeMessage = `Too early. Attendance can start at ${allowedStartTime.toTimeString().slice(0, 5)} (15 minutes before class).`;
+      } else if (currentMinutes >= classEndMinutes) {
+        // Class has completely ended
+        timeMessage = `Class has ended. Cannot start attendance after ${endTime.slice(0, 5)}.`;
+      } else if (currentMinutes >= classEndMinutesMinus20) {
+        const cutoffTime = new Date();
+        cutoffTime.setHours(Math.floor(classEndMinutesMinus20 / 60), classEndMinutesMinus20 % 60);
+        timeMessage = `Too late. Attendance stopped at ${cutoffTime.toTimeString().slice(0, 5)} (20 minutes before class end).`;
+      }
+    }
+  } else {
+    timeMessage = 'Class schedule not properly configured. Missing start/end time.';
+  }
+
+  if (!isCorrectDay) {
+    const dayName = DAY_NUMBER_TO_NAME[classDay] || 'Unknown';
+    timeMessage = `Today is not the scheduled day for this class. This class is scheduled for ${dayName}.`;
+  }
+
+  // Use statusOverride if provided (for initial validation), otherwise use state
+  const attendanceStatus = statusOverride !== null ? statusOverride : todayAttendanceStatus;
+  const canStart = isCorrectDay && isCorrectTime && attendanceStatus === 'not_taken';
+
+  setCanStartAttendance(canStart);
+  setTimeValidationMessage(timeMessage);
+};
+
 // Render attendance status and data
 const renderTodayAttendanceStatus = () => {
   if (isLoading) {

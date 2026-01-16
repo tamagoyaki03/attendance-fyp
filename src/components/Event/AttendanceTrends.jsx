@@ -154,7 +154,7 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
         }
 
         setData(chartData);
-      } catch (error) {
+      } catch {
         setData([]);
       } finally {
         setLoading(false);

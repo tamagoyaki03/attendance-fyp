@@ -325,8 +325,8 @@ export default function ReportGenerator() {
         default:
           throw new Error("Unsupported report type");
       }
-    } catch (err) {
-      showToast(err.message || "Failed to generate report", "error");
+    } catch (catchErr) {
+      showToast(catchErr.message || "Failed to generate report", "error");
       return null;
     }
   };
@@ -358,8 +358,8 @@ export default function ReportGenerator() {
       link.click();
       URL.revokeObjectURL(url);
       showToast("Download started");
-    } catch (err) {
-      showToast(err.message || "Download failed", "error");
+    } catch (catchErr) {
+      showToast(catchErr.message || "Download failed", "error");
     } finally {
       setDownloading(false);
     }

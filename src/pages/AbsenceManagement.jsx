@@ -87,7 +87,7 @@ export default function AbsenceManagement() {
             emailTemplate: data.email_template || DEFAULT_EMAIL_TEMPLATE
           });
         }
-      } catch (error) {
+      } catch {
         // Silently handle error - email settings are optional
       }
     };
@@ -271,6 +271,7 @@ export default function AbsenceManagement() {
         .in("session_id", sessionIds);
 
       if (mcRowsError && mcRowsError.code !== 'PGRST116') {
+        // MC rows error handled silently
       }
       const mcMap = new Map((mcRows || []).map(r => [`${r.session_id}-${r.student_id}`, r.status]));
       const mcSubmitted = (mcRows || []).length;
@@ -304,7 +305,7 @@ export default function AbsenceManagement() {
       setAbsences(enhancedAbsences);
       setAbsencesLoading(false);
 
-    } catch (error) {
+    } catch {
       setAbsenceStats({
         totalAbsences: 0,
         mcSubmitted: 0,
@@ -398,7 +399,7 @@ export default function AbsenceManagement() {
       }
 
       setSnackbar({ open: true, message: "Email settings updated successfully.", severity: "success" });
-    } catch (error) {
+    } catch {
       setSnackbar({ open: true, message: "Failed to update email settings. Please try again.", severity: "error" });
     } finally {
       setSettingsLoading(false);
