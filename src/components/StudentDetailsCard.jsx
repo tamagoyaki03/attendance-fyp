@@ -521,7 +521,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
               <Box minWidth={0}>
                 <Typography variant="h6" fontWeight="bold" noWrap>{student.name}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Matric No: {student.matric_number} • {student.email}
+                  Student ID: {student.matric_number} • {student.email}
                 </Typography>
                 <Box mt={1}>{getStatusBadge(student.status)}</Box>
               </Box>

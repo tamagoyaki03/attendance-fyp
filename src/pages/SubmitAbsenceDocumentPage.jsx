@@ -192,9 +192,23 @@ export default function SubmitAbsenceDocumentPage() {
         position: "top-center"
       });
 
-      // Store submitted data for confirmation display
+      // Fetch matric_number from users table for confirmation display
+      let matricNumber = studentId;
+      try {
+        const { data: userRow, error: userRowError } = await supabase
+          .from('users')
+          .select('matric_number')
+          .eq('id', studentId)
+          .maybeSingle();
+        if (!userRowError && userRow && userRow.matric_number) {
+          matricNumber = userRow.matric_number;
+        }
+      } catch {
+        // Ignore error, fallback to studentId
+      }
+
       setSubmittedData({
-        studentId,
+        matricNumber,
         studentName,
         course,
         absenceDate: absenceDate.toISOString().split('T')[0],
@@ -270,7 +284,7 @@ export default function SubmitAbsenceDocumentPage() {
           {submittedData && (
             <Box sx={{ bgcolor: "white", p: 3, borderRadius: 1, border: "1px solid #d1fae5" }}>
               <Typography variant="body2" color="text.secondary" gutterBottom>
-                <strong>Student ID:</strong> {submittedData.studentId}
+                <strong>Student ID:</strong> {submittedData.matricNumber}
               </Typography>
               {submittedData.studentName && (
                 <Typography variant="body2" color="text.secondary" gutterBottom>
