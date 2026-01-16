@@ -189,7 +189,10 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
         .eq("user_id", student.student_id)
         .eq("status", "approved");
 
-      if (leaveError) 
+      if (leaveError) {
+        // Error fetching leave requests
+      }
+      
       // Format date
       const formatDate = (dateString) => {
         if (!dateString) return "-";
@@ -243,7 +246,7 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
       });
 
       setAttendanceHistory(formattedHistory);
-    } catch (error) {
+    } catch {
       setAttendanceHistory([]);
     } finally {
       setIsLoadingHistory(false);
@@ -293,7 +296,7 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
       } else {
         setActionSnack({ open: true, message: 'Email sent to student.', severity: 'success' });
       }
-    } catch (e) {
+    } catch {
       setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
     }
   };
@@ -326,20 +329,8 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
     const sessionId = sessionInfo?.sessionId;
     
     
-    // First, check what fraud alerts exist for this student
-    const { data: existingAlerts, error: checkError } = await supabase
-      .from('fraud_detection_alerts')
-      .select('*')
-      .eq('user_id', studentId);
-    
-    // Also check by session
-    const { data: sessionAlerts, error: sessionError } = await supabase
-      .from('fraud_detection_alerts')
-      .select('*')
-      .eq('session_id', sessionId);
-    
     // Check if both conditions match
-    const { data: bothMatch, error: bothError } = await supabase
+    const { data: bothMatch } = await supabase
       .from('fraud_detection_alerts')
       .select('*')
       .eq('user_id', studentId)
@@ -352,15 +343,10 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
       // Update fraud alert status to 'resolved' instead of deleting (for fraud analysis)
       if (bothMatch && bothMatch.length > 0) {
         const alertIds = bothMatch.map(alert => alert.id);
-        const { data, error } = await supabase
+        await supabase
           .from('fraud_detection_alerts')
           .update({ status: 'resolved' })
-          .in('id', alertIds)
-          .select();
-        if (data && data.length > 0) {
-        } else {
-        }
-      } else {
+          .in('id', alertIds);
       }
       
       if (onRefresh) await onRefresh();
@@ -385,15 +371,10 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
     // Update fraud alert status to 'resolved' instead of deleting (for fraud analysis)
     if (bothMatch && bothMatch.length > 0) {
       const alertIds = bothMatch.map(alert => alert.id);
-      const { data, error: updateError } = await supabase
+      await supabase
         .from('fraud_detection_alerts')
         .update({ status: 'resolved' })
-        .in('id', alertIds)
-        .select();
-      if (data && data.length > 0) {
-      } else {
-      }
-    } else {
+        .in('id', alertIds);
     }
     
     selectedStudent.status = 'present';
@@ -701,7 +682,7 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                             const diffMs = checkIn.getTime() - sessionStart.getTime();
                             const diffMin = Math.round(diffMs / 60000);
                             return `${diffMin} min${Math.abs(diffMin) !== 1 ? 's' : ''}`;
-                          } catch (e) {
+                          } catch {
                             return '-';
                           }
                         })()}
