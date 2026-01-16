@@ -21,6 +21,10 @@ import { startFraudMonitoring, stopFraudMonitoring } from "../../utils/fraudUtil
 
 
 import { sendAbsenceEmailsAfterLectureEnd } from "../../utils/sendAbsenceAfterLectureEnd";
+
+// Helper function to pad numbers with leading zeros
+const pad = (n) => n.toString().padStart(2, '0');
+
 async function saveSessionPassword(sessionId, password) {
   if (sessionId && password) {
     try {
@@ -72,7 +76,6 @@ async function updateSessionEndTime(sessionId) {
       const now = new Date();
       const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
       // Format HH:MM:SS
-      const pad = (n) => n.toString().padStart(2, '0');
       const endHour = pad(localDate.getHours());
       const endMinute = pad(localDate.getMinutes());
       const endSecond = pad(localDate.getSeconds());

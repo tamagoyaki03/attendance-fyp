@@ -192,7 +192,7 @@ export default function AttendanceReportsTab() {
                 <TableRow>
                   <TableCell><strong>Class Code</strong></TableCell>
                   <TableCell>Total Sessions</TableCell>
-                  <TableCell>Students attended Last Session</TableCell>
+                  <TableCell>Students Attended Last Session</TableCell>
                   <TableCell>Last Session Attendance %</TableCell>
                   <TableCell>Last Session</TableCell>
                 </TableRow>
