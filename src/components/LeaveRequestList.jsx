@@ -149,7 +149,9 @@ export default function LeaveRequestList({ onChanged }) {
         .from("leave_requests")
         .update({ status: "approved" })
         .eq("id", id);
-      if (error) 
+      if (error) {
+        // Error handling
+      }
       // Also create excused attendance records for sessions on the leave date for this lecturer's courses
       const req = requests.find(r => r.id === id);
       const lecturer = JSON.parse(sessionStorage.getItem("user") || "null");
@@ -255,7 +257,10 @@ export default function LeaveRequestList({ onChanged }) {
         .from("leave_requests")
         .update({ status: "rejected", rejection_reason: rejectionReason })
         .eq("id", id);
-      if (error)     } catch (e) {
+      if (error) {
+        // Error handling
+      }
+    } catch (e) {
     } finally {
       setRequests((prev) =>
         prev.map((r) =>
