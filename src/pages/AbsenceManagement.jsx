@@ -75,10 +75,11 @@ export default function AbsenceManagement() {
           .from('email_settings')
           .select('*')
           .eq('lecturer_id', user.id)
-          .single();
+          .maybeSingle(); // Use maybeSingle() instead of single() to handle 0 rows gracefully
 
-        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
-          return;
+        // Only log errors that aren't "not found" (PGRST116) or "not acceptable" (406)
+        if (error && error.code !== 'PGRST116' && !error.message?.includes('406')) {
+          // Error fetching email settings (non-critical)
         }
 
         if (data) {
@@ -87,6 +88,7 @@ export default function AbsenceManagement() {
           });
         }
       } catch (error) {
+        // Silently handle error - email settings are optional
       }
     };
 
@@ -352,11 +354,22 @@ export default function AbsenceManagement() {
     setSettingsLoading(true);
     try {
       // Check if settings exist for this lecturer
-      const { data: existingSettings } = await supabase
+      const { data: existingSettings, error: checkError } = await supabase
         .from('email_settings')
         .select('lecturer_id')
         .eq('lecturer_id', user.id)
-        .single();
+        .maybeSingle(); // Use maybeSingle() to handle 0 rows gracefully
+
+      // If table doesn't exist (406 error), skip email settings
+      if (checkError && (checkError.message?.includes('406') || checkError.code === '42P01')) {
+        setSnackbar({
+          open: true,
+          message: 'Email settings feature is not available. Please contact administrator.',
+          severity: 'warning'
+        });
+        setSettingsLoading(false);
+        return;
+      }
 
       let result;
       if (existingSettings) {

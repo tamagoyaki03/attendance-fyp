@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Box,
   Typography,
@@ -274,6 +274,7 @@ export default function Overview() {
 
   // Check if a class is active based on end date
   const isClassActive = (cls) => {
+    if (!cls) return false; // Safety check for undefined/null
     const endDate = cls.lecture_end_date || cls.tutorial_end_date;
     if (!endDate) return true; // If no end date, consider it active
     const classEndDate = new Date(endDate);
@@ -300,30 +301,37 @@ export default function Overview() {
    );
  }
 
-  const filteredClasses = userClasses
-    .filter(
-      (cls) =>
-        cls.course_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        cls.course_code?.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-    .sort((a, b) => {
-      // Active classes first, then archived
-      const aActive = isClassActive(a);
-      const bActive = isClassActive(b);
-      if (aActive !== bActive) return aActive ? -1 : 1;
+  const filteredClasses = useMemo(() => {
+    return userClasses
+      .filter((cls) => {
+        if (!cls) return false; // Safety check
+        return (
+          cls.course_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          cls.course_code?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+      })
+      .sort((a, b) => {
+        // Safety checks
+        if (!a || !b) return 0;
+        
+        // Active classes first, then archived
+        const aActive = isClassActive(a);
+        const bActive = isClassActive(b);
+        if (aActive !== bActive) return aActive ? -1 : 1;
 
-      const dayA = a.day_of_week ?? 7;
-      const dayB = b.day_of_week ?? 7;
-      
-      if (dayA !== dayB) {
-        return dayA - dayB;
-      }
-      
-      // If same day, sort by start time (handle both lecture and tutorial)
-      const timeA = a.type === "Lecture" ? (a.lecture_start_time || "") : (a.tutorial_start_time || "");
-      const timeB = b.type === "Lecture" ? (b.lecture_start_time || "") : (b.tutorial_start_time || "");
-      return timeA.localeCompare(timeB);
-    });
+        const dayA = a.day_of_week ?? 7;
+        const dayB = b.day_of_week ?? 7;
+        
+        if (dayA !== dayB) {
+          return dayA - dayB;
+        }
+        
+        // If same day, sort by start time (handle both lecture and tutorial)
+        const timeA = a.type === "Lecture" ? (a.lecture_start_time || "") : (a.tutorial_start_time || "");
+        const timeB = b.type === "Lecture" ? (b.lecture_start_time || "") : (b.tutorial_start_time || "");
+        return timeA.localeCompare(timeB);
+      });
+  }, [userClasses, searchTerm]);
 
   const inputSx = {
     "& .MuiOutlinedInput-root": {

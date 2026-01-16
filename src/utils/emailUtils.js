@@ -154,10 +154,11 @@ export const getEmailSettings = async (lecturerId) => {
       .from("email_settings")
       .select("*")
       .eq("lecturer_id", lecturerId)
-      .single();
+      .maybeSingle(); // Use maybeSingle() to handle 0 rows gracefully
 
-    if (error && error.code !== "PGRST116") {
-      throw error;
+    // If error and not "not found", but still return default settings
+    if (error && error.code !== "PGRST116" && !error.message?.includes('406')) {
+      // Non-critical error, continue with default settings
     }
 
     const defaultTemplate = `Dear [Student Name],
