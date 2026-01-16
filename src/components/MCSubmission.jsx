@@ -191,7 +191,6 @@ export default function MCSubmissions({ onChanged }) {
 
         setSubmissions(rows);
       } catch (err) {
-        console.error("Error loading MC submissions:", err);
         setSubmissions([]);
       } finally {
         setLoading(false);
@@ -206,7 +205,6 @@ export default function MCSubmissions({ onChanged }) {
       // Get the submission details to extract session_id and student_id
       const submission = submissions.find(s => s.id === id);
       if (!submission) {
-        console.error('Submission not found');
         setSnackbar({ open: true, message: "Submission not found", severity: "error" });
         return;
       }
@@ -217,13 +215,10 @@ export default function MCSubmissions({ onChanged }) {
         .update({ status: 'approved' })
         .eq('id', id);
       if (updateError) {
-        console.error('Update error:', updateError);
         const errorMsg = updateError.message || updateError.code || 'Unknown error';
-        console.error('Full error details:', JSON.stringify(updateError));
         throw new Error(`Failed to update mc_submissions: ${errorMsg}`);
       }
 
-      console.log('MC submission approved successfully');
 
       // Extract enrollment info from submission
       const sessionId = submission.sessionId;
@@ -239,8 +234,7 @@ export default function MCSubmissions({ onChanged }) {
           .eq('course_id', submission.courseId)
           .single();
         enrollmentDebug = { type: 'lecture', studentId, courseId: submission.courseId, result: enrollment, error: enrollError };
-        if (enrollError) console.warn('Lecture enrollment fetch error:', enrollError, enrollmentDebug);
-        enrollmentId = enrollment?.id;
+        if (enrollError)         enrollmentId = enrollment?.id;
       } else {
         const { data: enrollment, error: enrollError } = await supabase
           .from('enrollment_tutorial')
@@ -249,8 +243,7 @@ export default function MCSubmissions({ onChanged }) {
           .eq('tutorial_id', submission.courseId)
           .single();
         enrollmentDebug = { type: 'tutorial', studentId, tutorialId: submission.courseId, result: enrollment, error: enrollError };
-        if (enrollError) console.warn('Tutorial enrollment fetch error:', enrollError, enrollmentDebug);
-        enrollmentId = enrollment?.id;
+        if (enrollError)         enrollmentId = enrollment?.id;
       }
 
       // Insert or update attendance_record with "excused" status if enrollment found
@@ -282,7 +275,6 @@ export default function MCSubmissions({ onChanged }) {
           .match(attendanceFilter)
           .maybeSingle();
         if (fetchError) {
-          console.error('Error checking for existing attendance_record:', fetchError, attendanceFilter);
         }
 
         if (existing && existing.id) {
@@ -292,10 +284,8 @@ export default function MCSubmissions({ onChanged }) {
             .update({ status: 'excused', created_at: createdAt })
             .eq('id', existing.id);
           if (updateError) {
-            console.error('Failed to update attendance_record to excused:', updateError, attendanceFilter);
             setSnackbar({ open: true, message: `Failed to update attendance to excused: ${updateError.message || 'Unknown error'}`, severity: "error" });
           } else {
-            console.log('Attendance_record updated to excused:', attendanceFilter);
           }
         } else {
           // Insert new excused record
@@ -313,15 +303,12 @@ export default function MCSubmissions({ onChanged }) {
             .from('attendance_record')
             .insert([attendanceRecord]);
           if (insertError) {
-            console.error('Failed to insert attendance_record:', insertError, attendanceRecord);
             setSnackbar({ open: true, message: `Failed to insert excused attendance: ${insertError.message || 'Unknown error'}`, severity: "error" });
           } else {
-            console.log('Excused attendance_record inserted:', attendanceRecord);
           }
         }
       } else {
         // Enrollment not found, show warning
-        console.warn('No enrollment found for MC approval:', enrollmentDebug);
         setSnackbar({ open: true, message: "No enrollment found for this student in the course. Excused attendance not recorded.", severity: "warning" });
       }
 
@@ -339,7 +326,6 @@ export default function MCSubmissions({ onChanged }) {
         window.dispatchEvent(new CustomEvent('attendance-updated', { detail: { sessionId, studentId } }));
       } catch {} // eslint-disable-line no-empty
     } catch (error) {
-      console.error('Approve failed:', error);
       setSnackbar({ open: true, message: `Failed to approve: ${error.message || 'Unknown error'}`, severity: "error" });
     } finally {
       setDialogOpen(false);
@@ -350,7 +336,6 @@ export default function MCSubmissions({ onChanged }) {
     try {
       const submission = submissions.find(s => s.id === id);
       if (!submission) {
-        console.error('Submission not found');
         setSnackbar({ open: true, message: "Submission not found", severity: "error" });
         return;
       }
@@ -361,7 +346,6 @@ export default function MCSubmissions({ onChanged }) {
         .update({ status: 'rejected' })
         .eq('id', id);
       if (updateError) {
-        console.error('Update error:', updateError);
         const errorMsg = updateError.message || updateError.code || 'Unknown error';
         throw new Error(`Failed to update mc_submissions: ${errorMsg}`);
       }
@@ -373,7 +357,6 @@ export default function MCSubmissions({ onChanged }) {
         .eq('id', submission.studentId)
         .single();
       if (userError) {
-        console.warn('Failed to fetch user info for email:', userError);
       }
 
       const lecturer = JSON.parse(sessionStorage.getItem('user') || 'null');
@@ -414,13 +397,11 @@ export default function MCSubmissions({ onChanged }) {
             },
           });
           if (fnError) {
-            console.error('Email function error:', fnError);
             setSnackbar({ open: true, message: 'Document rejected, but email failed to send.', severity: 'warning' });
           } else {
             setSnackbar({ open: true, message: 'Document rejected and email sent to student.', severity: 'success' });
           }
         } catch (e) {
-          console.error('Invoke email function failed:', e);
           setSnackbar({ open: true, message: 'Document rejected, but email failed to send.', severity: 'warning' });
         }
       } else {
@@ -440,7 +421,6 @@ export default function MCSubmissions({ onChanged }) {
       } catch {} // eslint-disable-line no-empty
 
     } catch (e) {
-      console.error('Reject failed:', e);
       setSnackbar({ open: true, message: `Failed to reject: ${e.message || 'Unknown error'}`, severity: 'error' });
     } finally {
       setDialogOpen(false);

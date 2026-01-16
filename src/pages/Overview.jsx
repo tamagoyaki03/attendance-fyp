@@ -46,7 +46,6 @@ export default function Overview() {
 
     const fetchNotifications = async () => {
       try {
-        console.log("Fetching notifications for lecturer:", user.id);
         
         // Fetch lecturer's classes
         const { data: lecturerClasses, error: classError } = await supabase
@@ -55,12 +54,10 @@ export default function Overview() {
           .eq("lecturer_id", user.id);
 
         if (classError) {
-          console.error("Error fetching lecturer classes:", classError);
           return;
         }
 
         const classIds = lecturerClasses?.map(cls => cls.id) || [];
-        console.log("Class IDs for lecturer:", classIds);
         
         if (classIds.length === 0) {
           setLoadingNotifications(false);
@@ -75,7 +72,7 @@ export default function Overview() {
           .in("course_lecture_id", classIds);
 
         if (sessionsError) {
-          console.error("Error fetching sessions for fraud alerts:", sessionsError);
+          // Error fetching sessions
         } else {
           const sessionIds = (sessions || []).map(s => s.id);
           let fraudCases = 0;
@@ -85,12 +82,11 @@ export default function Overview() {
               .select("id, session_id")
               .in("session_id", sessionIds);
             if (fraudError) {
-              console.error("Error fetching fraud alerts:", fraudError);
+              // Error fetching fraud alerts
             } else {
               fraudCases = fraudAlerts?.length || 0;
             }
           }
-          console.log("Found fraud cases (fraud_detection_alerts):", fraudCases);
           setLeaveRequests(prev => ({
             ...prev,
             fraudCases: fraudCases
@@ -105,10 +101,9 @@ export default function Overview() {
           .in("course_id", classIds);
 
         if (leaveError) {
-          console.error("Error fetching leave requests:", leaveError);
+          // Error fetching leave requests
         } else {
           const pendingLeave = leaveData?.length || 0;
-          console.log("Found pending leave requests:", pendingLeave);
           setLeaveRequests(prev => ({
             ...prev,
             pendingLeave: pendingLeave
@@ -123,7 +118,7 @@ export default function Overview() {
           .in("course_lecture_id", classIds);
 
         if (absenceSessionsError) {
-          console.error("Error fetching sessions:", absenceSessionsError);
+          // Error fetching sessions
         } else {
           const sessionIds = (absenceSessions || []).map(s => s.id);
           let pendingDocuments = 0;
@@ -136,13 +131,11 @@ export default function Overview() {
               .in("session_id", sessionIds);
 
             if (mcError) {
-              console.error("Error fetching MC submissions:", mcError);
+              // Error fetching MC submissions
             } else {
               pendingDocuments = mcData?.length || 0;
             }
           }
-
-          console.log("Found pending documents:", pendingDocuments);
           setLeaveRequests(prev => ({
             ...prev,
             pendingDocuments
@@ -150,7 +143,7 @@ export default function Overview() {
         }
 
       } catch (error) {
-        console.error("Error fetching notifications:", error);
+        // Error fetching notifications
       } finally {
         setLoadingNotifications(false);
       }
@@ -223,10 +216,10 @@ export default function Overview() {
         if (cancelled) return;
         
         if (lectureResult.error) {
-          console.error("Supabase fetch error (lectures):", lectureResult.error);
+          // Supabase fetch error (lectures)
         }
         if (tutorialResult.error) {
-          console.error("Supabase fetch error (tutorials):", tutorialResult.error);
+          // Supabase fetch error (tutorials)
         }
         
         const lectures = (lectureResult.data || []).map(c => ({ ...c, type: "Lecture" }));
@@ -266,7 +259,6 @@ export default function Overview() {
           loading: false
         });
       } catch (err) {
-        console.error("Unexpected fetch error:", err);
         if (!cancelled) setUserClasses([]);
       } finally {
         if (!cancelled) setIsLoading(false);

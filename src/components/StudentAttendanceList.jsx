@@ -38,7 +38,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
   // Listen for attendance updates
   React.useEffect(() => {
     const handleAttendanceUpdate = () => {
-      console.log('Attendance updated - refreshing list');
       setRefreshTrigger(prev => prev + 1);
     };
     window.addEventListener('attendance-updated', handleAttendanceUpdate);
@@ -49,7 +48,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
   React.useEffect(() => {
     async function fetchEnrolledAndAttendance() {
       if (!classData || !classData.id || !classData.type) {
-        console.log('Missing classData', { classData });
         return;
       }
       
@@ -62,7 +60,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
         .from(enrollmentTable)
         .select(`id, student_id, users ( id, name, email, matric_number )`)
         .eq(enrollmentField, classData.id);
-      console.log('Enrollments:', enrollments, 'Error:', enrollError);
       if (enrollError || !enrollments) return;
 
       // Find ALL sessions for this class this week
@@ -84,7 +81,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
         .lte('created_at', sunday.toISOString());
 
       if (weekSessionError || !weekSessions || weekSessions.length === 0) {
-        console.log('No sessions found for this week');
         setEnrolledStudents(enrollments.map(e => ({
           ...e.users,
           student_id: e.student_id,
@@ -106,14 +102,7 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
         .select(`id, status, created_at, marked_manually, ${attendanceField}, session_id, flag_reason`)
         .in('session_id', sessionIds);
       
-      console.log('=== ATTENDANCE DEBUG ===');
-      console.log('All Week SessionIds:', sessionIds);
-      console.log('AttendanceField:', attendanceField);
-      console.log('AttendanceRecords found:', attendanceRecords?.length || 0);
-      console.log('AttendanceRecords:', JSON.stringify(attendanceRecords, null, 2));
-      console.log('AttendanceError:', attendanceError);
       if (attendanceError) {
-        console.error('Error fetching attendance:', attendanceError);
         return;
       }
 
@@ -121,13 +110,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
       const merged = enrollments.map(e => {
         // Find attendance record for this enrollment (from ANY session this week)
         const attn = attendanceRecords?.find(r => r[attendanceField] === e.id);
-        console.log(`Student enrollment ID ${e.id}:`, {
-          found: !!attn,
-          attendanceFieldValue: attn ? attn[attendanceField] : 'N/A',
-          status: attn ? attn.status : 'undefined',
-          session_id: attn ? attn.session_id : 'N/A',
-          fullRecord: attn
-        });
         return {
           ...e.users,
           student_id: e.student_id,
@@ -141,8 +123,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
           flag_reason: attn ? attn.flag_reason : undefined
         };
       });
-      console.log('Merged students with status:', merged.map(s => ({ name: s.name, status: s.status, enrollmentId: s.enrollmentId })));
-      console.log('=== END DEBUG ===');
       setEnrolledStudents(merged);
     }
     fetchEnrolledAndAttendance();
@@ -209,7 +189,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
 
 
     // Debug: print student object and possible identifiers
-    console.log('Flagging student:', student);
     let attendanceId = student.attendance_id;
     let sessionId = student.session_id;
     if (!sessionId && classData && classData.session_id) {
@@ -247,12 +226,10 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
       if (error) updateError = error;
     } else {
       updateError = 'Missing attendance identifier';
-      console.error('Attendance flag update error: missing attendance_id', { sessionId, student });
     }
 
     if (updateError) {
       setFlagError('Failed to update attendance status: ' + (updateError.message || updateError));
-      console.error('Attendance flag update error:', updateError);
       return;
     }
 
@@ -280,7 +257,6 @@ export default function StudentAttendanceList({ classData, sessionId, onSelectSt
       if (onFlagged) onFlagged();
     } else {
       setFlagError('Cannot flag: missing session ID for this student.');
-      console.warn('Cannot insert fraud_detection_alerts: missing user_id or session_id', { userId, sessionId });
     }
     // Update local UI state so the student appears as flagged immediately (optional fallback)
     setStudentsState(prev => {

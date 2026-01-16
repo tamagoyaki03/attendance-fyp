@@ -19,13 +19,11 @@ export const sendAbsenceNotificationEmails = async (
   sessionId = null
 ) => {
   if (!absentStudents || absentStudents.length === 0) {
-    console.log("No absent students to notify");
     return { success: true, sentCount: 0, message: "No absent students to notify" };
   }
 
   // Validate that template is provided
   if (!emailTemplate || emailTemplate.trim() === "") {
-    console.error("ERROR: Email template is required but was not provided. Check that AbsenceManagement is passing the template.");
     return {
       success: false,
       sentCount: 0,
@@ -42,7 +40,6 @@ export const sendAbsenceNotificationEmails = async (
     
     for (const student of absentStudents) {
       if (!student.email || !student.name) {
-        console.warn("Skipping student - missing email or name:", student);
         continue;
       }
 
@@ -80,17 +77,12 @@ export const sendAbsenceNotificationEmails = async (
       };
     }
 
-    console.log(`📧 Sending ${emailsToSend.length} absence notification emails...`);
 
     // DEVELOPMENT MODE: Set to false to send real emails via Gmail
     const DEMO_MODE = false; // Changed to false for real email sending
     
     if (DEMO_MODE) {
-      console.log("🔧 DEMO MODE: Emails logged to console only (no real emails sent)");
       emailsToSend.forEach((email, index) => {
-        console.log(`  ${index + 1}. ✉️ ${email.studentName} <${email.to}>`);
-        console.log(`     Subject: ${email.subject}`);
-        console.log(`     Preview: ${email.html.substring(0, 100)}...`);
       });
       
       // Logging is now handled by the caller (sendAbsenceAfterLectureEnd.js)
@@ -113,12 +105,9 @@ export const sendAbsenceNotificationEmails = async (
     });
 
     if (error) {
-      console.error("Error calling email function:", error);
       // Fallback: log to console if Edge Function fails
-      console.warn("⚠️ Email service unavailable. Logging notifications to console:");
       emailsToSend.forEach(email => {
-        console.log(`  ✉️ ${email.studentName} (${email.to})`);
-        console.log(`     Subject: ${email.subject}`);
+      });
       });
       
       return {
@@ -129,13 +118,9 @@ export const sendAbsenceNotificationEmails = async (
       };
     }
 
-    console.log(`✅ Email sending completed: ${data.sentCount} sent, ${data.failedCount} failed`);
     
     if (data.failedEmails && data.failedEmails.length > 0) {
-      console.error("❌ Failed emails details:");
       data.failedEmails.forEach((failedEmail, index) => {
-        console.error(`  ${index + 1}. Email: ${failedEmail.email}`);
-        console.error(`     Error: ${failedEmail.error}`);
       });
     }
 
@@ -148,7 +133,6 @@ export const sendAbsenceNotificationEmails = async (
     };
 
   } catch (error) {
-    console.error("Error in sendAbsenceNotificationEmails:", error);
     return {
       success: false,
       sentCount: 0,
@@ -204,7 +188,6 @@ Thank you,
       reminderFrequency: "3days",
     };
   } catch (error) {
-    console.error("Error fetching email settings:", error);
     return {
       emailTemplate: `Dear [Student Name],
 

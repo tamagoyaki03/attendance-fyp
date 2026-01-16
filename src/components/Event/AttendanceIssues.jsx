@@ -74,7 +74,6 @@ export default function AttendanceIssues({ selectedClass }) {
               .in("id", userIds);
 
             if (usersError) {
-              console.error("Error fetching users:", usersError);
             } else {
               const map = {};
               (users || []).forEach((u) => (map[u.id] = u));
@@ -86,7 +85,6 @@ export default function AttendanceIssues({ selectedClass }) {
         }
 
       } catch (error) {
-        console.error("Error in fetchData:", error);
         setIssues([]);
       }
     };
@@ -173,7 +171,6 @@ export default function AttendanceIssues({ selectedClass }) {
       ));
       setDialogOpen(false);
     } catch (error) {
-      console.error("Error updating issue status:", error);
       alert("Failed to update issue status. Please try again.");
     }
   };

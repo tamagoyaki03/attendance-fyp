@@ -94,7 +94,6 @@ export default function LeaveRequestList({ onChanged }) {
     const users = usersRes.data || [];
 
     if (usersRes.error || lectureRes.error || tutorialRes.error) {
-      console.error("Error fetching leave requests:", usersRes.error || lectureRes.error || tutorialRes.error);
       setSnackbar({ open: true, message: "Error loading data" });
       setLoading(false);
       return;
@@ -150,8 +149,7 @@ export default function LeaveRequestList({ onChanged }) {
         .from("leave_requests")
         .update({ status: "approved" })
         .eq("id", id);
-      if (error) console.warn("Leave request approve DB error:", error);
-
+      if (error) 
       // Also create excused attendance records for sessions on the leave date for this lecturer's courses
       const req = requests.find(r => r.id === id);
       const lecturer = JSON.parse(sessionStorage.getItem("user") || "null");
@@ -221,7 +219,6 @@ export default function LeaveRequestList({ onChanged }) {
             if (inserts.length > 0) {
               const { error: insErr } = await supabase.from("attendance_record").insert(inserts);
               if (insErr) {
-                console.warn("Failed to insert excused attendance for leave:", insErr);
                 setSnackbar({ open: true, message: `Failed to add excused attendance: ${insErr.message || 'RLS or validation failed'}` });
               } else {
                 setSnackbar({ open: true, message: "Excused attendance recorded." });
@@ -234,7 +231,6 @@ export default function LeaveRequestList({ onChanged }) {
         }
       }
     } catch (e) {
-      console.error("Approve leave request failed:", e);
     } finally {
       setRequests((prev) =>
         prev.map((r) => (r.id === id ? { ...r, status: "approved" } : r))
@@ -259,9 +255,7 @@ export default function LeaveRequestList({ onChanged }) {
         .from("leave_requests")
         .update({ status: "rejected", rejection_reason: rejectionReason })
         .eq("id", id);
-      if (error) console.warn("Leave request reject DB error:", error);
-    } catch (e) {
-      console.error("Reject leave request failed:", e);
+      if (error)     } catch (e) {
     } finally {
       setRequests((prev) =>
         prev.map((r) =>

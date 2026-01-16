@@ -39,14 +39,6 @@ async function saveSessionPassword(sessionId, password) {
       const endMinute = pad(endDateTime.getMinutes());
       const endSecond = pad(endDateTime.getSeconds());
 
-      console.log("Saving session data:", {
-        sessionId,
-        password,
-        date: currentDate,
-        start_time: currentTime,
-        end_time: `${endHour}:${endMinute}:${endSecond}`
-      });
-
       // Add timeout to the database query
       const { error } = await Promise.race([
         supabase
@@ -64,14 +56,10 @@ async function saveSessionPassword(sessionId, password) {
       ]);
 
       if (error) {
-        console.error("Error updating session password:", error);
       } else {
-        console.log("Session password updated successfully");
       }
     } catch (error) {
-      console.error("Database operation failed:", error.message);
       if (error.message === 'Query timeout') {
-        console.log("Database query timed out - session will continue without password save");
       }
     }
   }
@@ -90,11 +78,6 @@ async function updateSessionEndTime(sessionId) {
       const endSecond = pad(localDate.getSeconds());
       const endTime = `${endHour}:${endMinute}:${endSecond}`;
 
-      console.log("Updating session end time:", {
-        sessionId,
-        end_time: endTime
-      });
-
       const { error } = await Promise.race([
         supabase
           .from("attendance_session")
@@ -108,12 +91,9 @@ async function updateSessionEndTime(sessionId) {
       ]);
       
       if (error) {
-        console.error("Error updating session end time:", error);
       } else {
-        console.log("Session end time updated successfully");
       }
     } catch (error) {
-      console.error("Failed to update session end time:", error.message);
     }
   }
 }
@@ -168,7 +148,6 @@ export default function AttendanceSession({
         }
       }
     } catch (e) {
-      console.warn("Error checking session expiry:", e);
     }
   };
 
@@ -223,12 +202,10 @@ useEffect(() => {
                 }
               }
             } catch (error) {
-              console.warn("Could not determine class type, defaulting to course:", error);
             }
           }
           
           const qrString = `${type}|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
-          console.log("Generating QR with string:", qrString);
           setQrValue(qrString);
           setIsExpired(false);
 
@@ -247,7 +224,6 @@ useEffect(() => {
                 .single();
               
               if (settingsError || !settings) {
-                console.warn("Could not fetch fraud detection settings, using defaults:", settingsError);
               }
               
               const maxKm = settings?.max_distance_km || 1.0;
@@ -257,10 +233,8 @@ useEffect(() => {
               fraudChannelRef.current = channel;
             }
           } catch (e) {
-            console.warn("Could not start fraud monitoring for session:", e);
           }
         } catch (error) {
-          console.error("Error generating QR code:", error);
           const fallbackQrString = `course|${classData?.id || ""}|${sessionPassword || ""}|${sessionId || ""}`;
           setQrValue(fallbackQrString);
         } finally {
@@ -281,7 +255,6 @@ useEffect(() => {
           });
         },
         (error) => {
-          console.warn("Could not get location:", error);
           setLocation({ lat: 0, lng: 0 }); // Set default so QR still generates
         }
       );

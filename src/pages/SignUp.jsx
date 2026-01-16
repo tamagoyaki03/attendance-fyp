@@ -94,13 +94,10 @@ export default function SignupPage() {
 
   const handleCreateAccount = async (e) => {
     e.preventDefault();
-    console.log("Form submitted");
     setMessage("");
     if (!validateForm()) {
-      console.log("Form validation failed");
       return;
     }
-    console.log("Form validation passed, creating account...");
     setIsLoading(true);
     
     try {
@@ -116,24 +113,20 @@ export default function SignupPage() {
         },
       });
       
-      console.log("Supabase response:", { data, error });
       
       if (error) {
-        console.error("Signup error:", error);
         setIsLoading(false);
         setMessage(error.message);
         return;
       }
 
       if (!data?.user) {
-        console.warn("No user data returned from signup");
         setIsLoading(false);
         setMessage("Something went wrong. Please try again.");
         return;
       }
 
       const userId = data.user.id;
-      console.log("User created:", data.user);
       setUserId(userId);
 
       // Step 2: Update user profile data (insert or update if already exists from trigger)
@@ -150,14 +143,11 @@ export default function SignupPage() {
           ]);
 
         if (upsertError) {
-          console.error("Error updating user data:", upsertError);
           // Don't fail signup just because user data update failed
           // User can still proceed to login and complete profile later
         } else {
-          console.log("User data updated successfully");
         }
       } catch (upsertErr) {
-        console.error("Unexpected error updating user data:", upsertErr);
         // Silently continue - auth user was created even if custom data update failed
       }
 
@@ -174,7 +164,6 @@ export default function SignupPage() {
         setMessage("A verification code has been sent to your email. Please enter it below.");
       }
     } catch (err) {
-      console.error("Unexpected error:", err);
       setIsLoading(false);
       setMessage("Network error. Please check your connection and try again.");
     }

@@ -55,7 +55,6 @@ export const geocodeAddress = async (address) => {
     }
     throw new Error('Location not found');
   } catch (error) {
-    console.error('Geocoding error:', error);
     throw error;
   }
 };
@@ -82,7 +81,6 @@ export const searchLocations = async (query) => {
     }
     return [];
   } catch (error) {
-    console.error('Location search error:', error);
     return [];
   }
 };

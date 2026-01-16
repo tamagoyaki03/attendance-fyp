@@ -12,7 +12,6 @@ const StudentSearch = ({ formData = {}, setFormData }) => {
       setLoading(true);
       const { data, error } = await supabase.from("users").select("id, name").eq("role", "student");
       if (error) {
-        console.error("Error fetching students:", error);
         setAllStudents([]);
       } else {
         setAllStudents(data || []);

@@ -81,12 +81,10 @@ export default function SubmitAbsenceDocumentPage() {
               setCourse(courseInfo);
             }
           } catch (err) {
-            console.warn('Failed to fetch course details:', err);
           }
         })();
       }
     } catch (e) {
-      console.warn('Failed to prefill from URL params:', e);
     }
 
     // Auto-fill from Supabase auth ONLY if user is a student (not lecturer/admin)
@@ -94,7 +92,6 @@ export default function SubmitAbsenceDocumentPage() {
       try {
         const { data, error } = await supabase.auth.getUser();
         if (error || !data?.user) {
-          console.warn('Auth getUser error:', error?.message);
           return;
         }
         const user = data.user;
@@ -110,7 +107,6 @@ export default function SubmitAbsenceDocumentPage() {
           if (!hasSname && inferredName) setStudentName(inferredName);
         }
       } catch (e) {
-        console.warn('Failed to prefill from auth:', e);
       }
     })();
   }, []);
@@ -132,7 +128,6 @@ export default function SubmitAbsenceDocumentPage() {
         .list('');
 
       if (bucketError) {
-        console.error("Storage bucket error:", bucketError);
         toast.error(
           bucketError?.message?.includes('does not exist')
             ? "Storage bucket 'absence-documents' not found. Please create it in Supabase Storage and set it to public read."
@@ -157,7 +152,6 @@ export default function SubmitAbsenceDocumentPage() {
         });
 
       if (uploadError) {
-        console.error("Upload error:", uploadError);
         const msg = uploadError?.message || 'Failed to upload document. Please try again.';
         toast.error(msg);
         setIsSubmitting(false);
@@ -185,7 +179,6 @@ export default function SubmitAbsenceDocumentPage() {
         ]);
 
       if (insertError) {
-        console.error("Insert error:", insertError);
         toast.error(insertError?.message || "Failed to save absence submission. Please try again.");
         setIsSubmitting(false);
         return;
@@ -217,7 +210,6 @@ export default function SubmitAbsenceDocumentPage() {
       setReason("");
       setDocumentFile(null);
     } catch (error) {
-      console.error("Error submitting absence document:", error);
       toast.error("An error occurred. Please try again.");
     } finally {
       setIsSubmitting(false);

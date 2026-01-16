@@ -78,7 +78,6 @@ export default function AbsenceManagement() {
           .single();
 
         if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
-          console.error('Error fetching email settings:', error);
           return;
         }
 
@@ -88,7 +87,6 @@ export default function AbsenceManagement() {
           });
         }
       } catch (error) {
-        console.error('Error loading email settings:', error);
       }
     };
 
@@ -99,7 +97,6 @@ export default function AbsenceManagement() {
     try {
       setLoading(true);
       setAbsencesLoading(true);
-      console.log("Fetching absence stats for lecturer:", user.id);
 
       // Get lecturer's courses (both lecture and tutorial)
       const [lectureRes, tutorialRes] = await Promise.all([
@@ -119,8 +116,6 @@ export default function AbsenceManagement() {
       const lectureIds = lectureRes.data?.map(course => course.id) || [];
       const tutorialIds = tutorialRes.data?.map(course => course.id) || [];
 
-      console.log("Found lecture IDs:", lectureIds);
-      console.log("Found tutorial IDs:", tutorialIds);
 
       if (lectureIds.length === 0 && tutorialIds.length === 0) {
         setAbsenceStats({
@@ -159,7 +154,6 @@ export default function AbsenceManagement() {
 
       if (sessionsError) throw sessionsError;
 
-      console.log("Found today's attendance sessions:", allSessions);
 
       if (!allSessions || allSessions.length === 0) {
         setAbsenceStats({
@@ -201,7 +195,6 @@ export default function AbsenceManagement() {
         ];
       }
 
-      console.log("All enrollments:", allEnrollments);
 
       // Get attendance records for today's sessions
       const { data: attendanceRecords, error: attendanceError } = await supabase
@@ -211,7 +204,6 @@ export default function AbsenceManagement() {
 
       if (attendanceError) throw attendanceError;
 
-      console.log("Attendance records:", attendanceRecords);
 
       // Calculate total absences
       const courseMeta = {};
@@ -244,7 +236,6 @@ export default function AbsenceManagement() {
           enrollment => !attendedEnrollmentIds.includes(enrollment.id)
         );
 
-        console.log(`Session ${session.id}: ${enrolledEnrollments.length} enrolled, ${attendedEnrollmentIds.length} attended, ${absentEnrollments.length} absent`);
         
         totalAbsences += absentEnrollments.length;
 
@@ -278,7 +269,6 @@ export default function AbsenceManagement() {
         .in("session_id", sessionIds);
 
       if (mcRowsError && mcRowsError.code !== 'PGRST116') {
-        console.error("Error fetching MC submissions:", mcRowsError);
       }
       const mcMap = new Map((mcRows || []).map(r => [`${r.session_id}-${r.student_id}`, r.status]));
       const mcSubmitted = (mcRows || []).length;
@@ -303,12 +293,6 @@ export default function AbsenceManagement() {
         };
       });
 
-      console.log("Calculated stats:", {
-        totalAbsences,
-        mcSubmitted,
-        pendingReview
-      });
-
       setAbsenceStats({
         totalAbsences,
         mcSubmitted,
@@ -319,7 +303,6 @@ export default function AbsenceManagement() {
       setAbsencesLoading(false);
 
     } catch (error) {
-      console.error("Error fetching absence stats:", error);
       setAbsenceStats({
         totalAbsences: 0,
         mcSubmitted: 0,
@@ -403,7 +386,6 @@ export default function AbsenceManagement() {
 
       setSnackbar({ open: true, message: "Email settings updated successfully.", severity: "success" });
     } catch (error) {
-      console.error('Error saving email settings:', error);
       setSnackbar({ open: true, message: "Failed to update email settings. Please try again.", severity: "error" });
     } finally {
       setSettingsLoading(false);

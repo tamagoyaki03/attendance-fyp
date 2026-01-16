@@ -105,10 +105,8 @@ export default function TopAbsenceReasons({ timeRange = "30days" }) {
           .select("id, reason, created_at");
 
         if (mcError) {
-          console.error("MC Error:", mcError);
         }
         if (leaveError) {
-          console.error("Leave Error:", leaveError);
         }
 
         // Collect all reasons from both MC submissions and leave requests
@@ -143,7 +141,6 @@ export default function TopAbsenceReasons({ timeRange = "30days" }) {
 
         setAbsenceData(absenceDataWithColors);
       } catch (error) {
-        console.error("Error fetching absence reasons:", error);
         setAbsenceData([]);
       } finally {
         setLoading(false);

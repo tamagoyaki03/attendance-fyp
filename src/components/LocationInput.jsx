@@ -30,7 +30,6 @@ const LocationInput = ({ formData, setFormData }) => {
           }))
         );
       } catch (err) {
-        console.error("Failed to fetch locations", err);
       } finally {
         setLoading(false);
       }

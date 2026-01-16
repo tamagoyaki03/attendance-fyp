@@ -54,7 +54,6 @@ export default function FraudReportsTab() {
           }
         }
       } catch (err) {
-        console.error("Error fetching fraud reports", err);
         setRows([]);
       } finally {
         setLoading(false);

@@ -90,8 +90,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
           .eq("user_id", student.student_id)
           .eq("status", "approved");
 
-        if (leaveError) console.error("Error fetching leave requests:", leaveError);
-
+        if (leaveError) 
         // Format date - add 8 hours for GMT+8
         const formatDate = (dateString) => {
           if (!dateString) return "-";
@@ -150,7 +149,6 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
 
        setAttendanceHistory(formattedHistory);
      } catch (error) {
-       console.error("Error fetching attendance history:", error);
        // Set empty array on error
        setAttendanceHistory([]);
      } finally {
@@ -178,7 +176,6 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
         },
         (payload) => {
           // Update current attendance record immediately
-          console.log("Attendance record updated:", payload.new);
           if (payload.new && payload.new.id === student?.attendanceRecord?.id) {
             setCurrentAttendanceRecord(payload.new);
           }
@@ -234,7 +231,6 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                 setAttendanceHistory(formattedHistory);
               }
             } catch (error) {
-              console.error("Error refreshing attendance history:", error);
             }
           })();
         }
@@ -436,7 +432,6 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
      XLSX.writeFile(wb, filename);
 
    } catch (error) {
-     console.error("Error generating report:", error);
      alert("Failed to generate report. Please try again.");
    } finally {
      setIsGeneratingReport(false);

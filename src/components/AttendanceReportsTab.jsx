@@ -150,7 +150,6 @@ export default function AttendanceReportsTab() {
 
         setRows(summaries);
       } catch (err) {
-        console.error("Error loading attendance reports", err);
         setError(err.message || "Failed to load attendance reports");
         setRows([]);
       } finally {

@@ -13,7 +13,6 @@ export const calculateAttendanceRate = async (classId, classType) => {
       .eq(courseIdField, classId);
 
     if (enrollmentError) {
-      console.error("Error fetching enrollments:", enrollmentError);
       return { attendanceRate: 0, totalStudents: 0, totalSessions: 0 };
     }
 
@@ -30,7 +29,6 @@ export const calculateAttendanceRate = async (classId, classType) => {
       .eq(sessionField, classId);
 
     if (sessionsError) {
-      console.error("Error fetching sessions:", sessionsError);
       return { attendanceRate: 0, totalStudents, totalSessions: 0 };
     }
 
@@ -48,7 +46,6 @@ export const calculateAttendanceRate = async (classId, classType) => {
       .in("session_id", sessionIds);
 
     if (attendanceError) {
-      console.error("Error fetching attendance:", attendanceError);
       return { attendanceRate: 0, totalStudents, totalSessions };
     }
 
@@ -68,7 +65,6 @@ export const calculateAttendanceRate = async (classId, classType) => {
     };
 
   } catch (error) {
-    console.error("Error calculating attendance rate:", error);
     return { attendanceRate: 0, totalStudents: 0, totalSessions: 0 };
   }
 };
@@ -97,7 +93,6 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
       .eq(courseIdField, classId);
 
     if (enrollmentError) {
-      console.error("Error fetching enrollments:", enrollmentError);
       return {
         totalStudents: 0,
         presentCount: 0,
@@ -144,7 +139,6 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
       .lte("created_at", weekEnd.toISOString());
 
     if (weekSessionsError) {
-      console.error("Error fetching week sessions:", weekSessionsError);
       return {
         totalStudents,
         presentCount: 0,
@@ -170,7 +164,6 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
       .eq(sessionField, classId);
 
     if (allSessionsError) {
-      console.error("Error fetching all sessions:", allSessionsError);
     }
 
     const totalOverallSessions = allSessions?.length || 0;
@@ -189,7 +182,6 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
         .in("session_id", weekSessionIds);
 
       if (attendanceError) {
-        console.error("Error fetching week attendance:", attendanceError);
       } else {
         weekAttendanceRecords = attendanceRecords || [];
         presentCount = weekAttendanceRecords.filter(r => r.status === 'present').length || 0;
@@ -208,7 +200,6 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
         .in("session_id", allSessionIds);
 
       if (allAttendanceError) {
-        console.error("Error fetching all attendance:", allAttendanceError);
       } else {
         overallAttendanceRecords = allAttendanceRecords || [];
       }
@@ -245,7 +236,6 @@ export const getDetailedAttendanceStats = async (classId, classType) => {
     };
 
   } catch (error) {
-    console.error("Error calculating detailed attendance stats:", error);
     return {
       totalStudents: 0,
       presentCount: 0,

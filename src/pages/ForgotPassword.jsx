@@ -117,7 +117,6 @@ export default function ForgotPasswordPage() {
       type: "recovery",
     });
     
-    console.log("verifyOtp result:", { error: verifyError });
 
     if (verifyError) {
       setError(verifyError.message);
@@ -130,7 +129,6 @@ export default function ForgotPasswordPage() {
       password: newPassword,
     });
 
-    console.log("updateUser result:", { error: updateError });
 
     setIsLoading(false);
     if (updateError) {

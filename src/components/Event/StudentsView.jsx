@@ -152,7 +152,6 @@ export default function StudentView() {
       setAttendanceRate(rate);
       setTotalSessions(records.length || null);
     } catch (err) {
-      console.warn("Failed to compute attendance rate", err);
       setAttendanceRate(null);
       setTotalSessions(null);
     } finally {

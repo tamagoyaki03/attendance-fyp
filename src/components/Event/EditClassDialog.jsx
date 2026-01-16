@@ -180,9 +180,7 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
           .eq("role", "lecturer");
         
         if (lecturerError) {
-          console.error("Error fetching lecturers:", lecturerError);
         } else {
-          console.log("Fetched lecturers:", lecturerData);
           setLecturers(lecturerData || []);
         }
 
@@ -193,13 +191,10 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
           .eq("role", "student");
         
         if (studentError) {
-          console.error("Error fetching students:", studentError);
         } else {
-          console.log("Fetched students:", studentData);
           setAllStudents(studentData || []);
         }
       } catch (error) {
-        console.error("Error:", error);
       }
     };
     
@@ -219,7 +214,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         5: "Friday"
       };
 
-      console.log("Loading class data:", classData);
 
       setFormData({
         code: classData.course_code || "",
@@ -267,14 +261,12 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         .eq(courseIdField, classData.id);
 
       if (error) {
-        console.error("Error fetching enrollments:", error);
         return;
       }
 
       const enrolledStudents = enrollments.map(enrollment => enrollment.users);
       setFormData(prev => ({ ...prev, students: enrolledStudents }));
     } catch (error) {
-      console.error("Error fetching enrolled students:", error);
     }
   };
 
@@ -298,7 +290,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       setLocationStatus('Current location obtained successfully!');
       setTimeout(() => setLocationStatus(''), 3000);
     } catch (error) {
-      console.error('Error getting location:', error);
       setLocationStatus(`Error: ${error.message}`);
       setTimeout(() => setLocationStatus(''), 5000);
     } finally {
@@ -332,7 +323,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       setLocationStatus('Location coordinates found!');
       setTimeout(() => setLocationStatus(''), 3000);
     } catch (error) {
-      console.error('Error geocoding location:', error);
       setLocationStatus('Could not find coordinates for this location');
       setTimeout(() => setLocationStatus(''), 5000);
     } finally {
@@ -371,7 +361,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
   };
 
   const handleClose = () => {
-    console.log("Handle close called, onClose type:", typeof onClose);
     setLocationStatus('');
     
     // Just close the dialog - don't reset form data here
@@ -381,7 +370,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         document.activeElement?.blur?.();
       }, 100);
     } else {
-      console.error("onClose is not a function:", onClose);
     }
   };
 
@@ -561,7 +549,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         .eq("id", classData.id);
 
       if (error) {
-        console.error("Update error:", error);
         alert("An error occurred while updating the class. Please try again.");
         setIsLoading(false);
         return;
@@ -574,7 +561,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
         .select(`id, student_id`)
         .eq(courseIdField, classData.id);
       if (fetchEnrollError) {
-        console.error("Error fetching current enrollments:", fetchEnrollError);
         setIsLoading(false);
         alert("An error occurred while updating enrollments. Please try again.");
         return;
@@ -616,7 +602,6 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
       if (onClassAdded) onClassAdded();
       handleClose();
     } catch (error) {
-      console.error("Error:", error);
       setIsLoading(false);
       alert("An error occurred while updating the class. Please try again.");
     }

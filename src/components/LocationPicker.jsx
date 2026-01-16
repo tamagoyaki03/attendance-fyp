@@ -64,7 +64,6 @@ export default function LocationPicker({ open, onClose, onLocationSelect, initia
         alert("Location not found. Please try another search term.");
       }
     } catch (error) {
-      console.error("Search error:", error);
       alert("Error searching location. Please try again.");
     }
   };

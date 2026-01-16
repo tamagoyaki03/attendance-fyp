@@ -155,7 +155,6 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
 
         setData(chartData);
       } catch (error) {
-        console.error("Error fetching attendance trends:", error);
         setData([]);
       } finally {
         setLoading(false);

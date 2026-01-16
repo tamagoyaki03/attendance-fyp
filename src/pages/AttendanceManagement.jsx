@@ -291,7 +291,6 @@ export default function AttendanceManagementPage() {
       }
     }
   } catch (error) {
-    console.error("Error checking today's attendance:", error);
     setTodayAttendanceStatus('not_taken');
     setCanStartAttendance(false);
     setTimeValidationMessage('Error loading class data');
@@ -366,10 +365,7 @@ export default function AttendanceManagementPage() {
         weekSession = weekSessions[0];
         // Only update currentAttendanceId if not already set (don't override active session)
         if (!currentAttendanceId) {
-          console.log('📝 fetchTodayAttendanceData - setting currentAttendanceId to:', weekSession.id);
           setCurrentAttendanceId(weekSession.id);
-        } else {
-          console.log('⚠️ fetchTodayAttendanceData - PRESERVING existing currentAttendanceId:', currentAttendanceId, 'Found session:', weekSession.id);
         }
       }
     }
@@ -519,7 +515,6 @@ export default function AttendanceManagementPage() {
     setAbsentCount(absentStudents.length);
 
   } catch (error) {
-    console.error("Error fetching weekly attendance data:", error);
     setTodayAttendanceData({ present: [], absent: [] });
   }
 };
@@ -888,14 +883,12 @@ const renderAttendanceList = () => {
          {/* Flagged Tab */}
          {activeTab === 'flagged' && (
            (() => {
-             console.log('classAttendance', classAttendance);
              // Combine date and start_time if both exist, else fallback to start_time
              let sessionStartTime = classAttendance?.start_time;
              if (classAttendance?.date && classAttendance?.start_time) {
                sessionStartTime = `${classAttendance.date}T${classAttendance.start_time}+08:00`;
              }
              const sessionInfo = { sessionId: currentAttendanceId, start_time: sessionStartTime, date: classAttendance?.date };
-             console.log('sessionInfo passed to FlaggedAttendanceList', sessionInfo);
              return (
                <FlaggedAttendanceList
                  students={todayAttendanceData.flagged || []}
@@ -926,12 +919,6 @@ const handleSelectStudent = async (student) => {
         }
         const attendanceField = selectedClass.type === "Tutorial" ? "tutorial_enrollment_id" : "lecture_enrollment_id";
         
-        console.log("Fetching attendance record for:", {
-         sessionId: currentAttendanceId,
-         enrollmentId: student.enrollmentId,
-         attendanceField
-       });
-
         const { data: attendanceRecord, error: attendanceError } = await supabase
           .from("attendance_record")
           .select("*, latitude, longitude, status, verification_data, session_id")
@@ -940,14 +927,11 @@ const handleSelectStudent = async (student) => {
           .single();
 
         if (attendanceError && attendanceError.code !== 'PGRST116') { // PGRST116 = no rows found
-          console.error("Error fetching attendance record:", attendanceError);
+          // Error fetching attendance record
         }
-
-        console.log("Attendance record found:", attendanceRecord);
 
         // Get class location data for distance calculation
         const classLocationData = await getClassLocationData();
-        console.log("Class location data:", classLocationData);
 
         // Fetch session start time if attendance record exists
         let sessionStartTime = null;
@@ -966,7 +950,7 @@ const handleSelectStudent = async (student) => {
               sessionStartTime = localDate.toISOString();
             }
           } catch (sessionErr) {
-            console.error("Error fetching session start time:", sessionErr);
+            // Error fetching session start time
           }
         }
 
@@ -990,7 +974,6 @@ const handleSelectStudent = async (student) => {
       setShowStudentDetails(true);
       setIsLoading(false);
     } catch (error) {
-      console.error("Error fetching student details:", error);
       setSelectedStudent(student);
       setShowStudentDetails(true);
       setIsLoading(false);
@@ -1029,7 +1012,6 @@ const getClassLocationData = async () => {
       };
     }
   } catch (error) {
-    console.error("Error fetching class location:", error);
     return null;
   }
 };
@@ -1175,7 +1157,6 @@ const handleCloseStudentDetails = () => {
       setClasses(classesWithDuration);
       setFetchError(null);
     } catch (error) {
-      console.error("Error fetching classes:", error);
       setFetchError('Could not fetch classes');
       setClasses([]);
     }
@@ -1241,7 +1222,6 @@ useEffect(() => {
       setPresentCount(present);
       setAbsentCount(absent);
     } catch (error) {
-      console.error("Error fetching attendance counts:", error);
     }
   };
 
@@ -1259,7 +1239,6 @@ useEffect(() => {
         filter: `session_id=eq.${currentAttendanceId}`
       },
       (payload) => {
-        console.log('Real-time attendance change detected:', payload);
         // Refresh counts and attendance list with slight delay to ensure DB is updated
         setTimeout(() => {
           fetchCounts();
@@ -1588,7 +1567,6 @@ const handleChooseMode = async (mode) => {
       }
 
       setCurrentAttendanceId(data.id);
-      console.log('🟢 SESSION STARTED - currentAttendanceId set to:', data.id);
       setCurrentSessionPassword(specialPassword);
       setSessionType("start");
       setQrDialogOpen(true);
@@ -1782,7 +1760,6 @@ const handleChooseMode = async (mode) => {
       });
 
     } catch (error) {
-      console.error("Error marking student present:", error);
       setSnackbar({
         open: true,
         message: "Failed to mark student as present. Please try again.",
@@ -1909,7 +1886,6 @@ const handleChooseMode = async (mode) => {
     XLSX.writeFile(wb, filename);
 
   } catch (error) {
-    console.error("Error generating class report:", error);
     setSnackbar({
       open: true,
       message: "Failed to generate class report. Please try again.",

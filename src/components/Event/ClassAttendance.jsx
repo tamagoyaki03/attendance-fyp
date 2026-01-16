@@ -111,7 +111,6 @@ export default function ClassAttendance({ classes }) {
 
         setClassesData(classDataWithStats);
       } catch (error) {
-        console.error("Error loading class data:", error);
         setClassesData([]);
       } finally {
         setIsInitialLoading(false);
@@ -141,7 +140,6 @@ export default function ClassAttendance({ classes }) {
             [classItem.id]: detailedStats,
           }));
         } catch (error) {
-          console.error("Error fetching detailed attendance data:", error);
         } finally {
           setLoadingStates((prev) => ({ ...prev, [classItem.id]: false }));
         }

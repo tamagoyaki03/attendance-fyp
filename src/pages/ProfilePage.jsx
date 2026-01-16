@@ -35,7 +35,6 @@ export default function ProfilePage() {
         .eq("id", userId)
         .single();
       if (error) {
-        console.error("Error fetching user:", error);
         setUser(null);
       } else {
         setUser(data);

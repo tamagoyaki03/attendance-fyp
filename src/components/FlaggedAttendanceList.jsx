@@ -189,8 +189,7 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
         .eq("user_id", student.student_id)
         .eq("status", "approved");
 
-      if (leaveError) console.error("Error fetching leave requests:", leaveError);
-
+      if (leaveError) 
       // Format date
       const formatDate = (dateString) => {
         if (!dateString) return "-";
@@ -245,7 +244,6 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
 
       setAttendanceHistory(formattedHistory);
     } catch (error) {
-      console.error("Error fetching attendance history:", error);
       setAttendanceHistory([]);
     } finally {
       setIsLoadingHistory(false);
@@ -291,13 +289,11 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
         },
       });
       if (error) {
-        console.error('Email function error:', error);
         setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
       } else {
         setActionSnack({ open: true, message: 'Email sent to student.', severity: 'success' });
       }
     } catch (e) {
-      console.error('Invoke email function failed:', e);
       setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
     }
   };
@@ -329,23 +325,18 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
     const studentId = selectedStudent.student_id || selectedStudent.userId || selectedStudent.user_id || selectedStudent.id;
     const sessionId = sessionInfo?.sessionId;
     
-    console.log('Mark Present - Deleting fraud alert:', { studentId, sessionId, selectedStudent, sessionInfo });
     
     // First, check what fraud alerts exist for this student
     const { data: existingAlerts, error: checkError } = await supabase
       .from('fraud_detection_alerts')
       .select('*')
       .eq('user_id', studentId);
-    console.log('Existing fraud alerts for student:', existingAlerts);
-    console.log('Looking for user_id:', studentId);
     
     // Also check by session
     const { data: sessionAlerts, error: sessionError } = await supabase
       .from('fraud_detection_alerts')
       .select('*')
       .eq('session_id', sessionId);
-    console.log('Existing fraud alerts for session:', sessionAlerts);
-    console.log('Looking for session_id:', sessionId);
     
     // Check if both conditions match
     const { data: bothMatch, error: bothError } = await supabase
@@ -353,7 +344,6 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
       .select('*')
       .eq('user_id', studentId)
       .eq('session_id', sessionId);
-    console.log('Fraud alerts matching BOTH user_id AND session_id:', bothMatch);
     
     // If parent handleMarkPresent is provided, use it (for consistent logic with absent tab)
     if (typeof parentHandleMarkPresent === 'function') {
@@ -362,20 +352,15 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
       // Update fraud alert status to 'resolved' instead of deleting (for fraud analysis)
       if (bothMatch && bothMatch.length > 0) {
         const alertIds = bothMatch.map(alert => alert.id);
-        console.log('Updating fraud alerts to resolved:', alertIds);
         const { data, error } = await supabase
           .from('fraud_detection_alerts')
           .update({ status: 'resolved' })
           .in('id', alertIds)
           .select();
-        console.log('Fraud alert update result (parent path):', { data, error, updatedCount: data?.length, alertIds });
         if (data && data.length > 0) {
-          console.log('Successfully marked fraud alerts as resolved:', data);
         } else {
-          console.warn('Failed to update fraud alerts status', { error, alertIds });
         }
       } else {
-        console.warn('No fraud alerts found to update for:', { studentId, sessionId });
       }
       
       if (onRefresh) await onRefresh();
@@ -400,20 +385,15 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
     // Update fraud alert status to 'resolved' instead of deleting (for fraud analysis)
     if (bothMatch && bothMatch.length > 0) {
       const alertIds = bothMatch.map(alert => alert.id);
-      console.log('Updating fraud alerts to resolved (fallback path):', alertIds);
       const { data, error: updateError } = await supabase
         .from('fraud_detection_alerts')
         .update({ status: 'resolved' })
         .in('id', alertIds)
         .select();
-      console.log('Fraud alert update result (fallback path):', { data, error: updateError, updatedCount: data?.length, alertIds });
       if (data && data.length > 0) {
-        console.log('Successfully marked fraud alerts as resolved:', data);
       } else {
-        console.warn('Failed to update fraud alerts status', { error: updateError, alertIds });
       }
     } else {
-      console.warn('No fraud alerts found to update for:', { studentId, sessionId });
     }
     
     selectedStudent.status = 'present';
@@ -722,7 +702,6 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                             const diffMin = Math.round(diffMs / 60000);
                             return `${diffMin} min${Math.abs(diffMin) !== 1 ? 's' : ''}`;
                           } catch (e) {
-                            console.error('Time difference calculation error:', e);
                             return '-';
                           }
                         })()}

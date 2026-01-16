@@ -29,7 +29,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
     .select("id, course_code, course_title, lecture_end_time, lecturer_id, day_of_week")
     .eq("lecturer_id", userId);
   if (lectureError) {
-    console.error("Error fetching lectures:", lectureError);
     return;
   }
 
@@ -39,7 +38,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
     .select("id, course_code, course_title, tutorial_end_time, lecturer_id, day_of_week")
     .eq("lecturer_id", userId);
   if (tutorialError) {
-    console.error("Error fetching tutorials:", tutorialError);
     return;
   }
 
@@ -75,7 +73,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
     for (const session of sessions) {
       // Check in-memory cache first to prevent spam
       if (processedSessionsToday.has(session.id)) {
-        console.log(`Session ${session.id} already processed today, skipping...`);
         continue;
       }
       
@@ -86,17 +83,14 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
         .eq("session_id", session.id);
       
       if (emailLogError) {
-        console.error(`Error checking if emails already sent for session ${session.id}:`, emailLogError);
         continue;
       }
       
       if (emailsSent && emailsSent.length > 0) {
-        console.log(`Emails already sent for lecture ${lecture.course_code} session ${session.id}, skipping...`);
         processedSessionsToday.add(session.id); // Add to cache
         continue; // Already sent
       }
       
-      console.log(`Processing absence emails for lecture ${lecture.course_code}, session ${session.id}`);
       
       // Get enrolled students
       const { data: enrolled, error: enrollError } = await supabase
@@ -131,7 +125,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
         .or(`session_id.eq.${session.id},absence_date.eq.${sessionDate}`);
       
       if (mcError) {
-        console.error(`Error checking MC submissions for session ${session.id}:`, mcError);
       }
       
       // Check for approved leave requests covering this date
@@ -144,7 +137,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
         .lte("date_time", `${sessionDate}T23:59:59`);
       
       if (leaveError) {
-        console.error(`Error checking leave requests for session ${session.id}:`, leaveError);
       }
       
       // Exclude students with approved MCs or leave requests
@@ -154,7 +146,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
       const absentIdsWithoutMC = absentIds.filter(id => !excludedStudents.includes(id));
       
       if (absentIdsWithoutMC.length === 0) {
-        console.log(`All absent students have approved MCs/leaves for lecture ${lecture.course_code} session ${session.id}, skipping emails...`);
         continue;
       }
       
@@ -169,11 +160,9 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
       const emailSettings = await getEmailSettings(lecture.lecturer_id);
       
       // Send emails
-      console.log(`Sending absence emails to ${users.length} students (${excludedStudents.length} excluded with approved MCs/leaves: ${studentsWithMC.length} MCs, ${studentsWithLeave.length} leaves) for lecture ${lecture.course_code}`);
       await sendAbsenceNotificationEmails(users, lecture, emailSettings.emailTemplate, lecture.lecturer_id, session.id);
       
       // Log sent
-      console.log(`Logging sent emails for session ${session.id}`);
       for (const student of users) {
         // Check if already logged to prevent duplicates
         const { data: existing } = await supabase
@@ -184,7 +173,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
           .single();
         
         if (existing) {
-          console.log(`Email already logged for student ${student.id}, session ${session.id}, skipping...`);
           continue;
         }
         
@@ -194,14 +182,12 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
           session_id: session.id
         });
         if (insertError) {
-          console.error(`Error logging sent email for student ${student.id}:`, insertError);
         }
       }
       
       // Mark session as processed to prevent duplicate sends
       processedSessionsToday.add(session.id);
       
-      console.log(`Completed absence email processing for lecture ${lecture.course_code} session ${session.id}`);
     }
   }
 
@@ -237,7 +223,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
     for (const session of sessions) {
       // Check in-memory cache first to prevent spam
       if (processedSessionsToday.has(session.id)) {
-        console.log(`Session ${session.id} already processed today, skipping...`);
         continue;
       }
       
@@ -248,17 +233,14 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
         .eq("session_id", session.id);
       
       if (emailLogError) {
-        console.error(`Error checking if emails already sent for session ${session.id}:`, emailLogError);
         continue;
       }
       
       if (emailsSent && emailsSent.length > 0) {
-        console.log(`Emails already sent for tutorial ${tutorial.course_code} session ${session.id}, skipping...`);
         processedSessionsToday.add(session.id); // Add to cache
         continue; // Already sent
       }
       
-      console.log(`Processing absence emails for tutorial ${tutorial.course_code}, session ${session.id}`);
       
       // Get enrolled students
       const { data: enrolled, error: enrollError } = await supabase
@@ -293,7 +275,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
         .or(`session_id.eq.${session.id},absence_date.eq.${sessionDate}`);
       
       if (mcError) {
-        console.error(`Error checking MC submissions for session ${session.id}:`, mcError);
       }
       
       // Check for approved leave requests covering this date
@@ -306,7 +287,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
         .lte("date_time", `${sessionDate}T23:59:59`);
       
       if (leaveError) {
-        console.error(`Error checking leave requests for session ${session.id}:`, leaveError);
       }
       
       // Exclude students with approved MCs or leave requests
@@ -316,7 +296,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
       const absentIdsWithoutMC = absentIds.filter(id => !excludedStudents.includes(id));
       
       if (absentIdsWithoutMC.length === 0) {
-        console.log(`All absent students have approved MCs/leaves for tutorial ${tutorial.course_code} session ${session.id}, skipping emails...`);
         continue;
       }
       
@@ -331,11 +310,9 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
       const emailSettings = await getEmailSettings(tutorial.lecturer_id);
       
       // Send emails
-      console.log(`Sending absence emails to ${users.length} students (${excludedStudents.length} excluded with approved MCs/leaves: ${studentsWithMC.length} MCs, ${studentsWithLeave.length} leaves) for tutorial ${tutorial.course_code}`);
       await sendAbsenceNotificationEmails(users, tutorial, emailSettings.emailTemplate, tutorial.lecturer_id, session.id);
       
       // Log sent
-      console.log(`Logging sent emails for session ${session.id}`);
       for (const student of users) {        // Check if already logged to prevent duplicates
         const { data: existing } = await supabase
           .from("absence_emails")
@@ -345,7 +322,6 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
           .single();
         
         if (existing) {
-          console.log(`Email already logged for student ${student.id}, tutorial session ${session.id}, skipping...`);
           continue;
         }
                 const { error: insertError } = await supabase.from("absence_emails").insert({
@@ -354,14 +330,12 @@ export async function sendAbsenceEmailsAfterLectureEnd(userId) {
           session_id: session.id
         });
         if (insertError) {
-          console.error(`Error logging sent email for student ${student.id}:`, insertError);
         }
       }
       
       // Mark session as processed to prevent duplicate sends
       processedSessionsToday.add(session.id);
       
-      console.log(`Completed absence email processing for tutorial ${tutorial.course_code} session ${session.id}`);
     }
   }
 }

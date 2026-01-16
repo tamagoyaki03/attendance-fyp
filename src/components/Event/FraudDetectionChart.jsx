@@ -64,7 +64,6 @@ export default function FraudDetectionChart({ timeRange = "30days" }) {
         }));
         setFraudData(chartData);
       } catch (error) {
-        console.error("Error fetching fraud data:", error);
         setFraudData([]);
       } finally {
         setLoading(false);

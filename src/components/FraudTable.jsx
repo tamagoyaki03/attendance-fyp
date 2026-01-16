@@ -70,7 +70,6 @@ export default function FraudTable({ searchTerm = "" }) {
         .order("created_at", { ascending: false });
 
       if (alertsError) {
-        console.error("Error fetching fraud detection alerts:", alertsError.message);
         return;
       }
 
@@ -95,7 +94,6 @@ export default function FraudTable({ searchTerm = "" }) {
       let sessionIds = [...new Set((alerts || []).filter(a => !a.course_code && a.session_id).map(a => a.session_id))];
       // Filter out invalid IDs
       sessionIds = sessionIds.filter(id => typeof id === 'string' && id.trim().length > 0);
-      console.log('FraudTable: sessionIds for attendance_session query:', sessionIds);
       if (sessionIds.length > 0) {
         // Get sessions
         let sessions, sessionsError;
@@ -113,7 +111,6 @@ export default function FraudTable({ searchTerm = "" }) {
           );
         }
         if (sessionsError) {
-          console.error('Supabase attendance_session query error:', sessionsError, 'sessionIds:', sessionIds);
         }
         if (!sessionsError && sessions) {
           // Map session_id to course_lecture_id or course_tutorial_id
@@ -193,7 +190,6 @@ export default function FraudTable({ searchTerm = "" }) {
       .update({ status: newStatus })
       .eq("id", recordId);
     if (error) {
-      console.error("Update attendance error", error);
       setActionSnack({ open: true, message: "Failed to update attendance.", severity: "error" });
       return;
     }
@@ -236,13 +232,11 @@ export default function FraudTable({ searchTerm = "" }) {
         },
       });
       if (error) {
-        console.error('Email function error:', error);
         setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
       } else {
         setActionSnack({ open: true, message: 'Email sent to student.', severity: 'success' });
       }
     } catch (e) {
-      console.error('Invoke email function failed:', e);
       setActionSnack({ open: true, message: 'Email failed to send.', severity: 'error' });
     }
   };
@@ -547,14 +541,12 @@ export default function FraudTable({ searchTerm = "" }) {
                                     checkIn = new Date(checkInRaw);
                                   }
                                   // Debug: log parsed times
-                                  console.log('FraudTable: sessionStart', sessionStart, 'checkIn', checkIn);
                                   if (isNaN(sessionStart) || isNaN(checkIn)) return '-';
                                   // Calculate difference in minutes
                                   const diffMs = checkIn.getTime() - sessionStart.getTime();
                                   const diffMin = Math.round(diffMs / 60000);
                                   return `${diffMin} min${Math.abs(diffMin) !== 1 ? 's' : ''}`;
                                   } catch {
-                                    console.error('FraudTable: error calculating time difference', { sessionRaw, checkInRaw });
                                   return '-';
                                 }
                               })()}

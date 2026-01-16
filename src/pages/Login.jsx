@@ -110,7 +110,6 @@ export default function LoginPage() {
     } catch (err) {
       setIsLoading(false);
       setMessage("An unexpected error occurred.");
-      console.error(err);
     }
   };
 

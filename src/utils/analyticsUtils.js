@@ -104,7 +104,6 @@ export async function calculateAttendanceMetrics(startDate, endDate) {
       absentCount,
     };
   } catch (error) {
-    console.error("Error calculating attendance metrics:", error);
     return {
       totalPossible: 0,
       presentCount: 0,

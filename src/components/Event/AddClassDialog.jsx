@@ -213,7 +213,6 @@ export default function AddClassDialog({ open, onClose, onClassAdded }) {
      setLocationStatus('Current location obtained successfully!');
      setTimeout(() => setLocationStatus(''), 3000);
    } catch (error) {
-     console.error('Error getting location:', error);
      setLocationStatus(`Error: ${error.message}`);
      setTimeout(() => setLocationStatus(''), 5000);
    } finally {
@@ -247,7 +246,6 @@ const handleGeocodeLocation = async () => {
     setLocationStatus('Location coordinates found!');
     setTimeout(() => setLocationStatus(''), 3000);
   } catch (error) {
-    console.error('Error geocoding location:', error);
     setLocationStatus('Could not find coordinates for this location');
     setTimeout(() => setLocationStatus(''), 5000);
   } finally {
@@ -289,7 +287,6 @@ const handleGeocodeLocation = async () => {
      parentCourseId: "",
    });
     if (typeof onClose === 'function') {
-      console.log("Calling onClose(false)");
       onClose(false);
     }
   };
@@ -627,7 +624,6 @@ const handleGeocodeLocation = async () => {
      }
 
     } catch (error) {
-      console.error("Error adding class:", error);
       alert("An error occurred while adding the class. Please try again.");
     } finally {
       setIsLoading(false);
@@ -848,7 +844,6 @@ const handleGeocodeLocation = async () => {
             <Button 
               variant="outlined" 
               onClick={(e) => {
-                console.log("Cancel button clicked");
                 e.preventDefault();
                 e.stopPropagation();
                 handleClose();

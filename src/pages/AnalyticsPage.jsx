@@ -133,19 +133,11 @@ export default function AnalyticsPage() {
       // Fraud attempts - fetch from fraud_detection_alerts table (only open/unresolved)
       const dateRange = getDateRange();
       
-      console.log('Analytics: Fetching fraud data with date range:', dateRange);
       
       const { data: fraudData, error: fraudError } = await supabase
         .from("fraud_detection_alerts")
         .select("id, created_at, status")
         .gte("created_at", dateRange.start);
-
-      console.log('Analytics: Fraud data query result:', { 
-        fraudData, 
-        fraudError, 
-        count: fraudData?.length,
-        dateRangeStart: dateRange.start 
-      });
 
       const fraudAttempts = fraudData?.length || 0;
 
@@ -213,7 +205,6 @@ export default function AnalyticsPage() {
         setFraudByMethod([]);
       }
     } catch (error) {
-      console.error("Error fetching analytics data:", error);
     } finally {
       setIsLoading(false);
     }

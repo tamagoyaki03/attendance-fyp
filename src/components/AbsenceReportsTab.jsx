@@ -107,7 +107,6 @@ export default function AbsenceReportsTab() {
             .in("session_id", sessionIds);
 
           if (mcErr) {
-            console.warn("mc_submissions fetch error", mcErr);
           } else {
             mcSubmissions = mcData || [];
           }
@@ -167,7 +166,6 @@ export default function AbsenceReportsTab() {
 
         setRows(summaries);
       } catch (err) {
-        console.error("Error loading absence reports", err);
         setError(err.message || "Failed to load absence reports");
         setRows([]);
       } finally {
