@@ -283,24 +283,7 @@ export default function Overview() {
     return classEndDate >= today;
   };
 
-  // Show loading state
- if (!user || isLoading) {
-   return (
-     <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
-       <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
-         <Sidebar />
-       </div>
-      <main
-        data-has-sidebar
-        className="p-[40px] max-h-screen overflow-y-auto"
-        style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
-      >
-         <Loading message="Loading classes..." fullScreen />
-       </main>
-     </div>
-   );
- }
-
+  // Filter and sort classes - MUST be called before any early returns
   const filteredClasses = useMemo(() => {
     return userClasses
       .filter((cls) => {
@@ -332,6 +315,24 @@ export default function Overview() {
         return timeA.localeCompare(timeB);
       });
   }, [userClasses, searchTerm]);
+
+  // Show loading state - AFTER all hooks
+  if (!user || isLoading) {
+    return (
+      <div style={{ background: "#eef2f7", minHeight: "100vh", width: "100%" }}>
+        <div className="fixed left-0 top-0 h-screen w-[250px] z-10">
+          <Sidebar />
+        </div>
+        <main
+          data-has-sidebar
+          className="p-[40px] max-h-screen overflow-y-auto"
+          style={{ minHeight: "100vh", marginLeft: "var(--sidebar-width, 250px)", transition: "margin-left 0.3s ease-in-out" }}
+        >
+          <Loading message="Loading classes..." fullScreen />
+        </main>
+      </div>
+    );
+  }
 
   const inputSx = {
     "& .MuiOutlinedInput-root": {

@@ -108,7 +108,6 @@ export const sendAbsenceNotificationEmails = async (
       // Fallback: log to console if Edge Function fails
       emailsToSend.forEach(email => {
       });
-      });
       
       return {
         success: false,

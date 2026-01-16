@@ -23,6 +23,8 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  // Fraud detection settings for time buffer
+  const [timeBufferMinutes, setTimeBufferMinutes] = useState(15); // Default 15 minutes
   // Track current attendance record with real-time updates
   const [currentAttendanceRecord, setCurrentAttendanceRecord] = useState(student?.attendanceRecord || null);
   // Get session start time from student object (pre-fetched in AttendanceManagement)
@@ -32,6 +34,26 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
   useEffect(() => {
     setCurrentAttendanceRecord(student?.attendanceRecord || null);
   }, [student?.attendanceRecord]);
+
+  // Fetch fraud detection settings for time buffer
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const { data: settings, error } = await supabase
+          .from("fraud_detection_settings")
+          .select("time_buffer_minutes")
+          .limit(1)
+          .maybeSingle();
+        
+        if (!error && settings?.time_buffer_minutes) {
+          setTimeBufferMinutes(settings.time_buffer_minutes);
+        }
+      } catch (err) {
+        // Use default value if fetch fails
+      }
+    };
+    fetchSettings();
+  }, []);
 
   // Fetch attendance history when component opens
   useEffect(() => {
@@ -90,7 +112,10 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
           .eq("user_id", student.student_id)
           .eq("status", "approved");
 
-        if (leaveError) 
+        if (leaveError) {
+          // Error fetching leave requests
+        }
+        
         // Format date - add 8 hours for GMT+8
         const formatDate = (dateString) => {
           if (!dateString) return "-";
@@ -570,7 +595,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                          const sessionStart = new Date(sessionStartTime);
                          const checkInTime = new Date(currentAttendanceRecord.created_at);
                          const timeDiffMinutes = Math.round((checkInTime - sessionStart) / (1000 * 60));
-                         const isLate = timeDiffMinutes > 15; // Consider late if more than 15 minutes
+                         const isLate = timeDiffMinutes > timeBufferMinutes; // Use dynamic time buffer from database
                          const isEarly = timeDiffMinutes < -5; // Early if checked in more than 5 minutes before start
 
                          return (
