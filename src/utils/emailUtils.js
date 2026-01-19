@@ -2,7 +2,7 @@ import supabase from "../config/supabaseClient";
 
 /**
  * Send absence notification emails to absent students
- * Template MUST be passed from caller - no default templates here.
+ * Template is retrieved from Absence Management settings. A default template is used only if the lecturer has not configured one.
  * This ensures the database-stored template from AbsenceManagement is always used.
  * @param {Array} absentStudents - Array of absent student objects with email and student_id
  * @param {Object} classData - Class information (course_code, course_title)
@@ -33,13 +33,16 @@ export const sendAbsenceNotificationEmails = async (
   }
 
   try {
-    const baseUrl = "https://attendance-fyp.vercel.app";
+    const baseUrl = import.meta.env.VITE_APP_URL;
 
     // Prepare email data for each student
     const emailsToSend = [];
     
     for (const student of absentStudents) {
+      const skippedStudents = [];
+
       if (!student.email || !student.name) {
+        skippedStudents.push(student.student_id);
         continue;
       }
 
@@ -74,25 +77,6 @@ export const sendAbsenceNotificationEmails = async (
         sentCount: 0, 
         failedCount: 0,
         message: "No valid emails to send" 
-      };
-    }
-
-
-    // DEVELOPMENT MODE: Set to false to send real emails via Gmail
-    const DEMO_MODE = false; // Changed to false for real email sending
-    
-    if (DEMO_MODE) {
-      emailsToSend.forEach(() => {
-      });
-      
-      // Logging is now handled by the caller (sendAbsenceAfterLectureEnd.js)
-      // which includes the session_id for proper tracking
-      
-      return {
-        success: true,
-        sentCount: emailsToSend.length,
-        failedCount: 0,
-        message: `Email notifications logged (DEMO MODE - ${emailsToSend.length} students)`,
       };
     }
 
@@ -177,7 +161,6 @@ Thank you,
         emailTemplate: data.email_template || defaultTemplate,
         ccEmails: data.cc_emails || "",
         emailTiming: data.email_timing || "immediate",
-        reminderFrequency: data.reminder_frequency || "3days",
       };
     }
 
@@ -185,7 +168,6 @@ Thank you,
       emailTemplate: defaultTemplate,
       ccEmails: "",
       emailTiming: "immediate",
-      reminderFrequency: "3days",
     };
   } catch {
     return {
@@ -201,7 +183,6 @@ Thank you,
 [University Name] Attendance Management System`,
       ccEmails: "",
       emailTiming: "immediate",
-      reminderFrequency: "3days",
     };
   }
 };

@@ -107,7 +107,6 @@ export default function AttendanceManagementPage() {
   setOnlineDialogOpen(false);
   setIsLoading(true);
 
-  // Save attendance session WITHOUT QR code
   try {
     const insertData = {
       latitude: null,
@@ -117,14 +116,15 @@ export default function AttendanceManagementPage() {
       min_watch_time: minWatchTime ? parseInt(minWatchTime) : null,
       course_lecture_id: null,
       course_tutorial_id: null,
-   };
+      date: new Date().toISOString().split('T')[0], 
+    };
 
-   // Set the appropriate ID field based on class type
-   if (selectedClass.type === "Tutorial") {
-     insertData.course_tutorial_id = selectedClass.id;
-   } else {
-     insertData.course_lecture_id = selectedClass.id;
-   }
+    // Set the appropriate ID field based on class type
+    if (selectedClass.type === "Tutorial") {
+      insertData.course_tutorial_id = selectedClass.id;
+    } else {
+      insertData.course_lecture_id = selectedClass.id;
+    }
     const { data, error } = await supabase
       .from('attendance_session')
       .insert([insertData])
@@ -136,17 +136,22 @@ export default function AttendanceManagementPage() {
     setClassAttendance(data);
     setSessionActive(true);
     setSessionStartTime(new Date());
-    
-    // Refresh attendance status and data after creating online session
+
+    // Force refresh of attendance status and UI
     await checkTodayAttendance();
     await fetchTodayAttendanceData(data.id);
-    
+    setTodayAttendanceStatus('taken');
+    setCanStartAttendance(false);
+
     setSnackbar({
       open: true,
       message: "Online attendance session started.",
       severity: "success",
     });
-    // Do NOT open QR dialog for online mode
+    // Dispatch event for real-time updates in StudentAttendanceList and other listeners
+    window.dispatchEvent(new CustomEvent('attendance-updated', {
+      detail: { sessionId: data.id }
+    }));
   } catch {
     setSnackbar({
       open: true,

@@ -12,8 +12,16 @@ export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
   const [recordingLink, setRecordingLink] = useState("");
   const [quizContent, setQuizContent] = useState("{\n  \"question\": \"\",\n  \"options\": [],\n  \"answer\": \"\"\n}");
   const [minWatchTime, setMinWatchTime] = useState("");
+  const [error, setError] = useState("");
+
+  const allFilled = recordingLink.trim() && quizContent.trim() && minWatchTime.trim();
 
   const handleProceed = () => {
+    if (!allFilled) {
+      setError("All fields are required.");
+      return;
+    }
+    setError("");
     onProceed({ recordingLink, quizContent, minWatchTime });
   };
 
@@ -40,6 +48,7 @@ export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
             label="Recording Link"
             variant="outlined"
             fullWidth
+            required
             value={recordingLink}
             onChange={(e) => setRecordingLink(e.target.value)}
             size="small"
@@ -59,6 +68,7 @@ export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
             label="Minimum Watch Time (minutes)"
             variant="outlined"
             fullWidth
+            required
             type="number"
             value={minWatchTime}
             onChange={(e) => setMinWatchTime(e.target.value)}
@@ -80,6 +90,7 @@ export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
             label="Quiz Content (JSON)"
             variant="outlined"
             fullWidth
+            required
             multiline
             minRows={4}
             value={quizContent}
@@ -95,6 +106,9 @@ export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
             }}
           />
         </Box>
+        {error && (
+          <Typography color="error" sx={{ mt: 1 }}>{error}</Typography>
+        )}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, py: 2, background: "#fff" }}>
@@ -104,6 +118,7 @@ export default function OnlineAttendanceDialog({ open, onClose, onProceed }) {
         <Button
           onClick={handleProceed}
           variant="contained"
+          disabled={!allFilled}
           sx={{ backgroundColor: "#0f172a", color: "#fff", textTransform: "none", "&:hover": { backgroundColor: "#0b1320" } }}
         >
           Proceed
