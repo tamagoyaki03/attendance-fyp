@@ -1222,20 +1222,6 @@ useEffect(() => {
     }
   }, [classId, classes]);
 
-  const getCurrentLocation = () => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error("Geolocation is not supported by your browser"))
-        return
-      }
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0,
-      })
-    })
-  }
-
   function ClassCardWithEnrollmentCount({ cls, addresses, onClick }) {
     const [totalStudents, setTotalStudents] = React.useState(null);
     const [isClassActive, setIsClassActive] = React.useState(false);
@@ -1379,7 +1365,8 @@ const handleChooseMode = async (mode) => {
   setAttendanceMode(mode);
   setChooseModeDialogOpen(false);
   if (mode === "Physical") {
-    await QRSession(mode); // Directly start QR session
+      const classLocation = await getClassLocationData();
+      await QRSession(mode, classLocation); 
   } else if (mode === "Online") {
     setOnlineDialogOpen(true);
   }
@@ -1422,11 +1409,7 @@ const handleChooseMode = async (mode) => {
     try {
       let location = null;
       if (mode === "Physical") {
-        const position = await getCurrentLocation();
-        location = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
+        location = arguments[1] || { lat: null, lng: null };
         setCurrentLocation(location);
       } else {
         location = { lat: null, lng: null };

@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useState, useRef } from "react"
 import {
   Box,
   Button,
@@ -24,7 +24,8 @@ export default function ForgotPasswordPage() {
   const [showReset, setShowReset] = useState(false)
   const [email, setEmail] = useState("")
   const [error, setError] = useState("")
-  const [otp, setOtp] = useState("")
+  const [otp, setOtp] = useState(["", "", "", "", "", ""])
+  const otpInputsRef = useRef([])
   const [newPassword, setNewPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [resetMessage, setResetMessage] = useState("")
@@ -89,7 +90,8 @@ export default function ForgotPasswordPage() {
     setResetMessage("")
 
     // Validate OTP
-    if (!otp || otp.trim() === "") {
+    const code = otp.join("");
+    if (code.length !== 6) {
       setError("Verification code is required");
       setIsLoading(false);
       return;
@@ -113,7 +115,7 @@ export default function ForgotPasswordPage() {
     // Step 1: Verify OTP
     const { error: verifyError } = await supabase.auth.verifyOtp({
       email,
-      token: otp,
+      token: code,
       type: "recovery",
     });
     
@@ -226,16 +228,66 @@ export default function ForgotPasswordPage() {
               <Typography fontSize={16} color="#0f172a" fontWeight={600}>
                 Verification Code
               </Typography>
-              <TextField
-                fullWidth
-                margin="normal"
-                name="otp"
-                value={otp}
-                onChange={e => setOtp(e.target.value)}
-                placeholder="Enter the code sent to your email"
-                sx={inputSx}
-                required
-              />
+              <Box display="flex" justifyContent="center" gap={1} mt={1} mb={2}>
+                {otp.map((digit, idx) => (
+                  <input
+                    key={idx}
+                    ref={el => otpInputsRef.current[idx] = el}
+                    value={digit}
+                    onChange={e => {
+                      const val = e.target.value.replace(/\D/g, "");
+                      if (!val) return;
+                      const newOtp = [...otp];
+                      newOtp[idx] = val[val.length - 1];
+                      setOtp(newOtp);
+                      if (idx < 5 && val) {
+                        otpInputsRef.current[idx + 1]?.focus();
+                      }
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Backspace") {
+                        if (otp[idx]) {
+                          const newOtp = [...otp];
+                          newOtp[idx] = "";
+                          setOtp(newOtp);
+                        } else if (idx > 0) {
+                          otpInputsRef.current[idx - 1]?.focus();
+                          const newOtp = [...otp];
+                          newOtp[idx - 1] = "";
+                          setOtp(newOtp);
+                        }
+                      } else if (e.key === "ArrowLeft" && idx > 0) {
+                        otpInputsRef.current[idx - 1]?.focus();
+                      } else if (e.key === "ArrowRight" && idx < 5) {
+                        otpInputsRef.current[idx + 1]?.focus();
+                      }
+                    }}
+                    onPaste={idx === 0 ? (e => {
+                      const paste = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+                      if (paste.length === 6) {
+                        setOtp(paste.split(""));
+                        otpInputsRef.current[5]?.focus();
+                        e.preventDefault();
+                      }
+                    }) : undefined}
+                    maxLength={1}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    style={{
+                      width: 36,
+                      height: 44,
+                      textAlign: "center",
+                      fontSize: 24,
+                      border: "1px solid #cbd5e1",
+                      borderRadius: 6,
+                      background: "#fff",
+                      color: "#0f172a",
+                    }}
+                    autoFocus={idx === 0}
+                    disabled={isLoading}
+                  />
+                ))}
+              </Box>
               <Typography fontSize={16} color="#0f172a" fontWeight={600} mt={2}>
                 New Password
               </Typography>

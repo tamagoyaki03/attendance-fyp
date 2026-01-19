@@ -402,8 +402,13 @@ export default function ClassAttendance({ classes }) {
                 borderRadius: 1,
                 opacity: 0.6,
                 mb: 2,
+                position: "relative",
               }}
             >
+              {/* Archived badge at top right */}
+              <Box sx={{ position: "absolute", top: 12, right: 16, zIndex: 2 }}>
+                <Chip label="Archived" size="small" variant="outlined" sx={{ borderColor: "#fecaca", color: "#991b1b", fontWeight: 600 }} />
+              </Box>
               <CardHeader
                 sx={{
                   px: 3,
@@ -416,7 +421,17 @@ export default function ClassAttendance({ classes }) {
                         <Typography variant="subtitle1" fontWeight="bold" color="text.primary">
                           {item.code}: {item.name}
                         </Typography>
-                        <Chip label="Archived" size="small" variant="outlined" sx={{ borderColor: "#fecaca", color: "#991b1b" }} />
+                        <Chip 
+                          label={item.type} 
+                          size="small" 
+                          sx={{ 
+                            height: "20px",
+                            fontSize: "0.7rem",
+                            backgroundColor: item.type === "Lecture" ? "#dbeafe" : "#fce7f3",
+                            color: item.type === "Lecture" ? "#0c4a6e" : "#831843",
+                            fontWeight: 600,
+                          }}
+                        />
                       </Box>
                       <Typography variant="caption" color="text.secondary">
                         {item.lecturer} • {item.time}

@@ -19,7 +19,7 @@ import { toast } from "react-toastify";
 import supabase from "../config/supabaseClient";
 
 export default function SubmitAbsenceDocumentPage() {
-  const [studentId, setStudentId] = useState("");
+  const [studentId, setStudentId] = useState(""); 
   const [studentName, setStudentName] = useState("");
   const [course, setCourse] = useState("");
   const [sessionId, setSessionId] = useState(null);
@@ -89,7 +89,7 @@ export default function SubmitAbsenceDocumentPage() {
       // Error parsing URL params handled silently
     }
 
-    // Auto-fill from Supabase auth ONLY if user is a student (not lecturer/admin)
+    // Always auto-fill studentId from Supabase auth (matric_number)
     (async () => {
       try {
         const { data, error } = await supabase.auth.getUser();
@@ -99,14 +99,17 @@ export default function SubmitAbsenceDocumentPage() {
         const user = data.user;
         const meta = user.user_metadata || {};
         const role = meta.role || user.app_metadata?.role;
-        
-        // Only auto-fill if the logged-in user is explicitly a student
+        // Only auto-fill name and studentId if the logged-in user is explicitly a student
         if (role === 'student') {
-          const inferredId = meta.student_id || meta.id || (user.email ? user.email.split('@')[0] : '');
           const inferredName = meta.full_name || meta.name || meta.display_name || meta.student_name || '';
-          
-          if (!hasSid && inferredId) setStudentId(inferredId);
           if (!hasSname && inferredName) setStudentName(inferredName);
+          // Fetch matric_number from users table
+          const { data: userRow, error: userRowError } = await supabase
+            .from('users')
+            .select('matric_number')
+            .eq('id', user.id)
+            .maybeSingle();
+          if (!hasSid && userRow && userRow.matric_number) setStudentId(userRow.matric_number);
         }
       } catch {
         // Error fetching user info handled silently
@@ -171,7 +174,7 @@ export default function SubmitAbsenceDocumentPage() {
         .from('mc_submissions')
         .insert([
           {
-            student_id: studentId,
+            student_id: studentId, // This is now always matric_number
             session_id: sessionId || null,
             absence_date: absenceDate.toISOString().split('T')[0],
             reason: reason,
@@ -192,20 +195,8 @@ export default function SubmitAbsenceDocumentPage() {
         position: "top-center"
       });
 
-      // Fetch matric_number from users table for confirmation display
+      // No need to fetch matric_number again, studentId is already matric_number
       let matricNumber = studentId;
-      try {
-        const { data: userRow, error: userRowError } = await supabase
-          .from('users')
-          .select('matric_number')
-          .eq('id', studentId)
-          .maybeSingle();
-        if (!userRowError && userRow && userRow.matric_number) {
-          matricNumber = userRow.matric_number;
-        }
-      } catch {
-        // Ignore error, fallback to studentId
-      }
 
       setSubmittedData({
         matricNumber,
