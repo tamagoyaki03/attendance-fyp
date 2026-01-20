@@ -176,18 +176,30 @@ async function processClass({
     console.log("EXCLUDED IDS (MC/Leave):", Array.from(excluded));
     console.log("FINAL ABSENT IDS:", finalAbsentIds);
 
+    // Before sending emails
+    const { data: alreadyEmailed } = await supabase
+      .from("absence_emails")
+      .select("student_id")
+      .eq("session_id", session.id);
+
+    const alreadyEmailedIds = (alreadyEmailed || []).map(e => e.student_id);
+    const toEmailIds = finalAbsentIds.filter(id => !alreadyEmailedIds.includes(id));
+
     // ---------------------------
     // Fetch users + send
     // ---------------------------
+    if (!toEmailIds.length) continue;
+
     const { data: users } = await supabase
       .from("users")
       .select("id, email, name, matric_number")
-      .in("id", finalAbsentIds);
+      .in("id", toEmailIds);
 
     if (!users?.length) continue;
 
     const emailSettings = await getEmailSettings(classData.lecturer_id);
 
+    // Send emails only to students who have not already been emailed
     await sendAbsenceNotificationEmails(
       users,
       classData,
@@ -195,5 +207,15 @@ async function processClass({
       classData.lecturer_id,
       session.id
     );
+
+    // Insert records for each student just emailed
+    for (const student_id of toEmailIds) {
+      const { error } = await supabase
+        .from("absence_emails")
+        .insert([{ student_id, session_id: session.id }]);
+      if (error && error.code !== '23505') {
+        console.error("Failed to insert absence_emails record:", error);
+      }
+    }
   }
 }
