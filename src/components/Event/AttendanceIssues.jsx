@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
-  Typography, Avatar, Chip, TextField, Tabs, Tab, IconButton
+  Typography, Avatar, Chip, Tabs, Tab, IconButton
 } from "@mui/material";
 import { Info, Download, CheckCircle, Cancel } from "@mui/icons-material";
 import supabase from "../../config/supabaseClient";
@@ -13,7 +13,6 @@ export default function AttendanceIssues({ selectedClass }) {
   const [isDialogOpen, setDialogOpen] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [statusFilter, setStatusFilter] = useState("all");
-  const [resolutionNotes, setResolutionNotes] = useState("");
   const [tab, setTab] = useState(0);
   const [usersMap, setUsersMap] = useState({});
 
@@ -97,81 +96,124 @@ export default function AttendanceIssues({ selectedClass }) {
     statusFilter === "all" || issue.status === statusFilter
   );
 
+  const formatUtcTime = (dateString) => {
+    if (!dateString) return "-";
+    const date = new Date(dateString);
+    return date.toLocaleString("en-US", { timeZone: "UTC", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  };
+
   const handleViewDetails = (issue) => {
     setSelectedIssue(issue);
-    setResolutionNotes(issue.resolution_notes || "");
     setDialogOpen(true);
   };
 
   const handleUpdateStatus = async (id) => {
-    if (!resolutionNotes.trim()) {
-      alert("Please provide resolution notes to resolve the issue.");
-      return;
-    }
-
     try {
-      // Find the issue to get enrollment info
       const issue = issues.find((i) => i.id === id);
       if (!issue) throw new Error("Issue not found");
 
-      // Update issue as resolved
+      // Mark issue as resolved
       const { error: issueError } = await supabase
         .from("attendance_issues")
-        .update({ 
-          status: "resolved", 
-          resolution_notes: resolutionNotes.trim(),
-          updated_at: new Date().toISOString()
+        .update({
+          status: "resolved",
+          updated_at: new Date().toISOString(),
         })
         .eq("id", id);
+
       if (issueError) throw issueError;
 
-      // Insert new attendance_record as present
-      // Determine enrollment field and value
-      let enrollmentField = null;
-      let enrollmentId = null;
-      if (issue.enrollment_tutorial_id) {
-        enrollmentField = "tutorial_enrollment_id";
-        enrollmentId = issue.enrollment_tutorial_id;
-      } else if (issue.enrollment_lecture_id) {
+      // Resolve enrollment → class mapping
+      let enrollmentField;
+      let enrollmentId;
+      let sessionClassColumn;
+      let classId;
+
+      if (issue.enrollment_lecture_id) {
         enrollmentField = "lecture_enrollment_id";
         enrollmentId = issue.enrollment_lecture_id;
-      }
-      if (enrollmentField && enrollmentId && issue.session_id && issue.user_id) {
-        // Check if already present
-        const { data: existing, error: checkError } = await supabase
-          .from("attendance_record")
-          .select("id")
-          .eq(enrollmentField, enrollmentId)
-          .eq("session_id", issue.session_id)
-          .maybeSingle();
-        if (!checkError && !existing) {
-          await supabase
-            .from("attendance_record")
-            .insert({
-              [enrollmentField]: enrollmentId,
-              session_id: issue.session_id,
-              user_id: issue.user_id,
-              status: "present",
-              created_at: new Date().toISOString(),
-              marked_manually: true
-            });
-        }
+        sessionClassColumn = "course_lecture_id";
+
+        const { data, error } = await supabase
+          .from("enrollment_lecture")
+          .select("course_id")
+          .eq("id", enrollmentId)
+          .single();
+
+        if (error || !data) throw new Error("Failed to resolve lecture enrollment");
+        classId = data.course_id;
+      } 
+      else if (issue.enrollment_tutorial_id) {
+        enrollmentField = "tutorial_enrollment_id";
+        enrollmentId = issue.enrollment_tutorial_id;
+        sessionClassColumn = "course_tutorial_id";
+
+        const { data, error } = await supabase
+          .from("enrollment_tutorial")
+          .select("tutorial_id")
+          .eq("id", enrollmentId)
+          .single();
+
+        if (error || !data) throw new Error("Failed to resolve tutorial enrollment");
+        classId = data.tutorial_id;
+      } 
+      else {
+        throw new Error("Issue has no enrollment reference");
       }
 
-      // Update local state
-      setIssues((prev) => prev.map((issue) => 
-        issue.id === id 
-          ? { 
-              ...issue, 
-              status: "resolved", 
-              resolution_notes: resolutionNotes.trim(),
-              updated_at: new Date().toISOString()
-            } 
-          : issue
-      ));
+      // Find MOST RECENT session BEFORE issue was created
+      const issueTime = new Date(issue.created_at).toISOString();
+
+      const { data: session, error: sessionError } = await supabase
+        .from("attendance_session")
+        .select("id, created_at")
+        .eq(sessionClassColumn, classId)
+        .lte("created_at", issueTime)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (sessionError || !session?.id) {
+        throw new Error("No matching attendance session found");
+      }
+
+      // Upsert attendance_record as PRESENT
+      const local = new Date();
+      const fakeUtc = new Date(local.getTime() + 8 * 60 * 60 * 1000);
+      const { error: recordError } = await supabase
+        .from("attendance_record")
+        .upsert(
+          {
+            [enrollmentField]: enrollmentId,
+            session_id: session.id,
+            status: "present",
+            marked_manually: true,
+            attendance_issue_id: issue.id,
+            created_at: fakeUtc,
+          },
+          {
+            onConflict:
+              enrollmentField === "lecture_enrollment_id"
+                ? "lecture_enrollment_id,session_id"
+                : "tutorial_enrollment_id,session_id",
+          }
+        );
+
+      if (recordError) throw recordError;
+
+      // Update UI
+      setIssues((prev) =>
+        prev.map((i) =>
+          i.id === id
+            ? { ...i, status: "resolved", updated_at: new Date().toISOString() }
+            : i
+        )
+      );
+
       setDialogOpen(false);
-    } catch {
-      alert("Failed to update issue status. Please try again.");
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "Failed to resolve issue");
     }
   };
 
@@ -248,10 +290,7 @@ export default function AttendanceIssues({ selectedClass }) {
 
                   <TableCell>
                     <Typography variant="body2">
-                      {new Date(issue.created_at).toLocaleDateString()}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {new Date(issue.created_at).toLocaleTimeString()}
+                      {formatUtcTime(issue.created_at)}
                     </Typography>
                   </TableCell>
 
@@ -305,7 +344,7 @@ export default function AttendanceIssues({ selectedClass }) {
                     <strong>Email:</strong> {usersMap[selectedIssue.user_id]?.email || "N/A"}
                   </Typography>
                   <Typography gutterBottom>
-                    <strong>Date & Time:</strong> {new Date(selectedIssue.created_at).toLocaleString()}
+                    <strong>Date & Time:</strong> {formatUtcTime(selectedIssue.created_at)}
                   </Typography>
                   <Typography gutterBottom>
                     <strong>Issue Type:</strong> {selectedIssue.issue_type}
@@ -319,34 +358,6 @@ export default function AttendanceIssues({ selectedClass }) {
                     </Typography>
                     {getStatusChip(selectedIssue.status)}
                   </Box>
-
-                  {selectedIssue.status === "pending" && (
-                    <TextField 
-                      label="Resolution Notes" 
-                      fullWidth 
-                      multiline 
-                      rows={4} 
-                      margin="normal" 
-                      value={resolutionNotes} 
-                      onChange={(e) => setResolutionNotes(e.target.value)}
-                      placeholder="Enter notes about how this issue was resolved..."
-                    />
-                  )}
-
-                  {selectedIssue.resolution_notes && (
-                    <Box mt={2} p={2} bgcolor="grey.100" borderRadius={1}>
-                      <Typography variant="subtitle2" gutterBottom>
-                        <Info sx={{ mr: 1, verticalAlign: 'middle' }} />
-                        Resolution Notes
-                      </Typography>
-                      <Typography variant="body2">{selectedIssue.resolution_notes}</Typography>
-                      {selectedIssue.updated_at && (
-                        <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-                          Last updated: {new Date(selectedIssue.updated_at).toLocaleString()}
-                        </Typography>
-                      )}
-                    </Box>
-                  )}
                 </Box>
               )}
 

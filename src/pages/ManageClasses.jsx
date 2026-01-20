@@ -388,9 +388,9 @@ const ManageClasses = () => {
         </Card>
       </main>
 
-      <AddClassDialog open={openAddClassDialog} onClose={() => setOpenAddClassDialog(false)} onClassAdded={fetchClasses} />
+      <AddClassDialog open={openAddClassDialog} onClose={() => setOpenAddClassDialog(false)} onClassAdded={fetchClasses} disableRestoreFocus/>
 
-      <EditClassDialog open={openEditClassDialog} onClose={() => setOpenEditClassDialog(false)} classData={selectedClass} onClassAdded={fetchClasses} />
+      <EditClassDialog open={openEditClassDialog} onClose={() => setOpenEditClassDialog(false)} classData={selectedClass} onClassAdded={fetchClasses} disableRestoreFocus/>
 
       <ConfirmDialog
         open={deleteDialog.open}
@@ -401,6 +401,7 @@ const ManageClasses = () => {
         confirmText="Delete"
         cancelText="Cancel"
         severity="error"
+        disableRestoreFocus
       />
     </div>
   );

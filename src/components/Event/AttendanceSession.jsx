@@ -19,9 +19,6 @@ import Button from "../Button";
 import supabase from "../../config/supabaseClient";
 import { startFraudMonitoring, stopFraudMonitoring } from "../../utils/fraudUtils";
 
-
-// sendAbsenceEmailsAfterLectureEnd removed - not used in this component
-
 // Helper function to pad numbers with leading zeros
 const pad = (n) => n.toString().padStart(2, '0');
 
@@ -105,21 +102,20 @@ export default function AttendanceSession({
   onFinalize,
   sessionPassword,
   sessionId,
+  location,
 }) {
   const [qrValue, setQrValue] = useState("");
   const [isExpired, setIsExpired] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [location, setLocation] = useState(null);
   const creatingSession = useRef(false);
   const fraudChannelRef = useRef(null);
 
   // End attendance, update end_time, and note that emails are sent by scheduled job
   const handleEndAttendance = async () => {
     await updateSessionEndTime(sessionId);
-    
+    setIsExpired(true); // Mark QR as expired only when Close is clicked
     // NOTE: Absence emails are NOT sent here immediately. They are sent automatically by sendAbsenceEmailsAfterLectureEnd
     // after the class end_time has passed. This is done via the scheduled interval check in AttendanceManagement.jsx
-    
     if (onFinalize) {
       onFinalize();
     }
@@ -128,39 +124,7 @@ export default function AttendanceSession({
     }
   };
 
-  // Check if session has ended based on DB end_time
-  const checkSessionExpired = async () => {
-    if (!sessionId) return;
-    try {
-      const { data: session, error } = await supabase
-        .from("attendance_session")
-        .select("end_time, date")
-        .eq("id", sessionId)
-        .single();
-      
-      if (error || !session) return;
-      
-      if (session.end_time && session.date) {
-        const endDateTime = new Date(`${session.date}T${session.end_time}`);
-        if (new Date() > endDateTime) {
-          setIsExpired(true);
-        }
-      }
-    } catch {
-      // Error handled silently
-    }
-  };
-
-// Check session expiry from database
-useEffect(() => {
-  if (open && sessionId) {
-    checkSessionExpired();
-    // Poll every 10 seconds to check if session has ended
-    const interval = setInterval(checkSessionExpired, 10000);
-    return () => clearInterval(interval);
-  }
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [open, sessionId]);
+  // Remove session expiry polling and DB check
 
   // Generate a QR code when the dialog opens
   useEffect(() => {
@@ -243,24 +207,6 @@ useEffect(() => {
     }
   }, [open, sessionType, classData, sessionPassword, sessionId]);
 
-  // Get current location when dialog opens
-  useEffect(() => {
-    if (open) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLocation({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-        },
-        () => {
-          setLocation({ lat: 0, lng: 0 }); // Set default so QR still generates
-        }
-      );
-      setCurrentTime(new Date());
-    }
-  }, [open]);
-
   // Cleanup fraud monitoring when dialog closes or on unmount
   useEffect(() => {
     if (!open && fraudChannelRef.current) {
@@ -275,8 +221,7 @@ useEffect(() => {
     };
   }, [open]);
 
-  // Update the render condition - remove location requirement
-  if (!open || !classData || !qrValue) {
+  if (!open || !classData) {
     return null;
   }
 
@@ -306,12 +251,7 @@ useEffect(() => {
 
         <Box display="flex" flexDirection="column" alignItems="center" py={2}>
           <Box position="relative">
-            {isExpired ? (
-              <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height={300} width={300} borderRadius={2} border="1px dashed" borderColor="grey.300">
-                <QrCodeIcon sx={{ fontSize: 64, color: "text.secondary", mb: 2 }} />
-                <Typography align="center">QR Code expired</Typography>
-              </Box>
-            ) : (
+            {!isExpired ? (
               <>
                 <Box border={1} borderRadius={2} borderColor="grey.300" mb={2} overflow="hidden">
                   {qrValue ? (
@@ -330,13 +270,18 @@ useEffect(() => {
                   )}
                 </Box>
               </>
+            ) : (
+              <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height={300} width={300} borderRadius={2} border="1px dashed" borderColor="grey.300">
+                <QrCodeIcon sx={{ fontSize: 64, color: "text.secondary", mb: 2 }} />
+                <Typography align="center">QR Code expired</Typography>
+              </Box>
             )}
           </Box>
 
           <Box width="100%" mt={3}>
             <Box display="flex" justifyContent="space-between" mb={1}>
               <Typography color="text.secondary">Class:</Typography>
-              <Typography>{classData?.course_code || "Unknown"} {classData?.course_title || ""}</Typography>
+              <Typography>{classData?.course_code || "Unknown"}</Typography>
             </Box>
 
             <Box display="flex" justifyContent="space-between" mb={1}>
@@ -344,15 +289,19 @@ useEffect(() => {
               <Chip label="Check-in" variant="outlined" color="success" />
             </Box>
 
-            {location && (
               <Box display="flex" justifyContent="space-between" mb={1}>
                 <Typography color="text.secondary">Location:</Typography>
                 <Box display="flex" alignItems="center">
                   <LocationOnIcon sx={{ fontSize: 16, mr: 0.5, color: "text.secondary" }} />
-                  <Typography variant="caption">{`${Number(location.lat).toFixed(6)}, ${Number(location.lng).toFixed(6)}`}</Typography>
+                  {location && (typeof location.lat === 'number' && typeof location.lng === 'number') ? (
+                    <Typography variant="caption">{`${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`}</Typography>
+                  ) : location && (typeof location.latitude === 'number' && typeof location.longitude === 'number') ? (
+                    <Typography variant="caption">{`${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`}</Typography>
+                  ) : (
+                    <Typography variant="caption" color="text.secondary">No location</Typography>
+                  )}
                 </Box>
               </Box>
-            )}
 
             <Box display="flex" justifyContent="space-between">
               <Typography color="text.secondary">Time:</Typography>

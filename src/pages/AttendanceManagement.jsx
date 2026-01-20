@@ -27,7 +27,6 @@ import AttendanceStats  from "../components/AttendanceStats"
 import Button from "../components/Button";
 import FlaggedAttendanceList from "../components/FlaggedAttendanceList"
 import AttendanceIssues from "../components/Event/AttendanceIssues";
-import ChooseModeDialog from "./Dialogs/chooseModeDialog";
 import OnlineAttendanceDialog from "./Dialogs/onlineAttendanceDialog";
 import ViewDetailsButton from "../components/ViewDetailsButton";
 import * as XLSX from 'xlsx';
@@ -72,7 +71,6 @@ export default function AttendanceManagementPage() {
   const [enrolledStudents, setEnrolledStudents] = useState([]);
   const [currentSessionPassword, setCurrentSessionPassword] = useState(null);
   const [showStudentDetails, setShowStudentDetails] = useState(false);
-  const [chooseModeDialogOpen, setChooseModeDialogOpen] = useState(false);
   const [onlineDialogOpen, setOnlineDialogOpen] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [attendanceMode, setAttendanceMode] = useState(null);
@@ -94,12 +92,19 @@ export default function AttendanceManagementPage() {
     return () => window.removeEventListener('attendance-updated', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClass, currentAttendanceId]);
+
   // Send absence emails after lecture_end_time is reached
   useEffect(() => {
     if (!user?.id) return;
-    const interval = setInterval(() => {
-      sendAbsenceEmailsAfterLectureEnd(user.id);
-    }, 60 * 1000); // check every 1 minute
+
+    const interval = setInterval(async () => {
+      const result = await sendAbsenceEmailsAfterLectureEnd(user.id);
+
+      if (result?.emailsSent) {
+        clearInterval(interval); // ✅ STOP polling
+      }
+    }, 60 * 1000);
+
     return () => clearInterval(interval);
   }, [user?.id]);
 
@@ -349,7 +354,7 @@ export default function AttendanceManagementPage() {
         .from("attendance_session")
         .select("*")
         .eq("id", sessionId)
-        .single();
+        .maybeSingle();
       
       if (!sessionError && session) {
         weekSession = session;
@@ -849,7 +854,7 @@ const handleSelectStudent = async (student) => {
               .from("attendance_session")
               .select("created_at")
               .eq("id", attendanceRecord.session_id)
-              .single();
+              .maybeSingle();
 
             if (!sessionError && session?.created_at) {
               // Add 8 hours to convert from UTC to GMT+8 (Asia/Kuala_Lumpur)
@@ -929,48 +934,50 @@ const handleCloseStudentDetails = () => {
   setSelectedStudent(null);
 };
 
-  const handleStartSession = () => {
-   // Prevent starting a new session if one is already active
-   if (sessionActive) {
-     setSnackbar({
-       open: true,
-       message: "Attendance session is already in progress.",
-       severity: "error"
-     });
-     return;
-   }
+  const handleStartSession = async () => {
+    // Prevent starting a new session if one is already active
+    if (sessionActive) {
+      setSnackbar({
+        open: true,
+        message: "Attendance session is already in progress.",
+        severity: "error"
+      });
+      return;
+    }
 
-   if (todayAttendanceStatus === 'taken') {
-     setSnackbar({
-       open: true,
-       message: "Attendance has already been taken for today.",
-       severity: "error"
-     });
-     return;
-   }
+    if (todayAttendanceStatus === 'taken') {
+      setSnackbar({
+        open: true,
+        message: "Attendance has already been taken for today.",
+        severity: "error"
+      });
+      return;
+    }
 
-   if (!canStartAttendance) {
-     setSnackbar({
-       open: true,
-       message: timeValidationMessage,
-       severity: "error"
-     });
-     return;
-   }
-   
-   const isOnlineClass = selectedClass?.location?.toLowerCase().includes('online') || 
-                       selectedClass?.lecture_location?.toLowerCase().includes('online') ||
-                       selectedClass?.tutorial_location?.toLowerCase().includes('online');
+    if (!canStartAttendance) {
+      setSnackbar({
+        open: true,
+        message: timeValidationMessage,
+        severity: "error"
+      });
+      return;
+    }
 
-  if (isOnlineClass) {
-    // Directly open online attendance dialog for online classes
-    setAttendanceMode("Online");
-    setOnlineDialogOpen(true);
-  } else {
-    // Show mode selection dialog for physical/hybrid classes
-    setChooseModeDialogOpen(true);
-  }
-};
+    // Determine if class is online by checking location fields
+    const isOnlineClass = (
+      selectedClass?.location?.toLowerCase?.().includes('online') ||
+      selectedClass?.lecture_location?.toLowerCase?.().includes('online') ||
+      selectedClass?.tutorial_location?.toLowerCase?.().includes('online')
+    );
+
+    if (isOnlineClass) {
+      setAttendanceMode('Online');
+      setOnlineDialogOpen(true);
+    } else {
+      // Create session and open QR dialog only after session is ready
+      await QRSession('Physical');
+    }
+  };
 
   useEffect(() => {
   const fetchClasses = async () => {
@@ -1085,7 +1092,7 @@ useEffect(() => {
         .from("attendance_session")
         .select("id, course_lecture_id, course_tutorial_id")
         .eq("id", currentAttendanceId)
-        .single();
+        .maybeSingle();
 
       if (sessionError || !session) return;
 
@@ -1366,17 +1373,6 @@ useEffect(() => {
     );
   }
 
-const handleChooseMode = async (mode) => {
-  setAttendanceMode(mode);
-  setChooseModeDialogOpen(false);
-  if (mode === "Physical") {
-      const classLocation = await getClassLocationData();
-      await QRSession(mode, classLocation); 
-  } else if (mode === "Online") {
-    setOnlineDialogOpen(true);
-  }
-};
-
   // QR session: insert new row and store its id (attendance_session table)
   const QRSession = async (mode) => {
     if (!selectedClass.id) {
@@ -1412,14 +1408,16 @@ const handleChooseMode = async (mode) => {
     }));
 
     try {
-      let location = null;
-      if (mode === "Physical") {
-        location = arguments[1] || { lat: null, lng: null };
-        setCurrentLocation(location);
-      } else {
-        location = { lat: null, lng: null };
-        setCurrentLocation(null);
-      }
+      const location =
+        mode === "Physical"
+          ? {
+              lat: selectedClass.latitude,
+              lng: selectedClass.longitude,
+            }
+          : { lat: null, lng: null };
+
+      // Set currentLocation state so AttendanceSession receives correct location, then open dialog in useEffect
+      setCurrentLocation(location);
 
       // Create attendance session payload - let created_at use database default (now())
       // Set date and start_time for today's session tracking
@@ -1427,7 +1425,7 @@ const handleChooseMode = async (mode) => {
       const localDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kuala_Lumpur' }));
       const currentDate = localDate.toISOString().split('T')[0]; // YYYY-MM-DD
       const currentTime = localDate.toTimeString().split(' ')[0]; // HH:MM:SS
-      
+
       const insertData = {
         latitude: location.lat,
         longitude: location.lng,
@@ -1440,7 +1438,7 @@ const handleChooseMode = async (mode) => {
 
       // Determine type and set ONLY the correct column
       const isTutorial = selectedClass.type === "Tutorial";
-      
+
       if (isTutorial) {
         insertData.course_tutorial_id = selectedClass.id;
       } else {
@@ -1461,7 +1459,7 @@ const handleChooseMode = async (mode) => {
       setCurrentAttendanceId(data.id);
       setCurrentSessionPassword(specialPassword);
       setSessionType("start");
-      setQrDialogOpen(true);
+      // Do NOT open QR dialog here; open in useEffect below
 
       // Mark attendance as taken for today to prevent duplicate sessions
       setTodayAttendanceStatus('taken');
@@ -1484,6 +1482,12 @@ const handleChooseMode = async (mode) => {
     }
   };
 
+  useEffect(() => {
+    if (sessionType === 'start' && currentLocation) {
+      setQrDialogOpen(true);
+    }
+  }, [sessionType, currentLocation]);
+
   // 2. Fetch attendance data by session id (attendance_session table)
   useEffect(() => {
     if (!currentAttendanceId) return;
@@ -1492,7 +1496,7 @@ const handleChooseMode = async (mode) => {
         .from("attendance_session")
         .select("*")
         .eq("id", currentAttendanceId)
-        .single();
+        .maybeSingle();
       if (!error) setClassAttendance(data);
       else setClassAttendance(null);
     };
@@ -1688,7 +1692,7 @@ const handleChooseMode = async (mode) => {
      .from("attendance_session")
      .select("id, created_at, date")
      .eq("id", currentAttendanceId)
-     .single();
+     .maybeSingle();
 
    if (sessionError) throw sessionError;
 
@@ -2231,6 +2235,7 @@ const handleChooseMode = async (mode) => {
           setRequireQrToEnd={setRequireQrToEnd}
           duration={30} 
           isActive={sessionActive}
+          location={currentLocation} 
         />
 
         <Toast
@@ -2241,11 +2246,7 @@ const handleChooseMode = async (mode) => {
           autoHideDuration={4000}
         />
 
-        <ChooseModeDialog
-          open={chooseModeDialogOpen}
-          onClose={() => setChooseModeDialogOpen(false)}
-          onChoose={handleChooseMode}
-        />
+        {/* ChooseModeDialog removed: no longer needed for any session type */}
 
         <OnlineAttendanceDialog
           open={onlineDialogOpen}

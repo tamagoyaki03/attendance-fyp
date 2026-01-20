@@ -47,7 +47,7 @@ export const sendAbsenceNotificationEmails = async (
       }
 
       // Create personalized submission link with student data
-  const submitAbsenceLink = `${baseUrl}/student-absence/submit?studentId=${encodeURIComponent(student.student_id)}&name=${encodeURIComponent(student.name)}${sessionId ? `&sessionId=${sessionId}` : ''}`;
+  const submitAbsenceLink = `${baseUrl}/student-absence/submit?studentId=${encodeURIComponent(student.id)}&name=${encodeURIComponent(student.name)}${sessionId ? `&sessionId=${sessionId}` : ''}`;
 
       // Personalize the email template and convert newlines to HTML breaks
       let personalizedTemplate = emailTemplate
@@ -66,7 +66,8 @@ export const sendAbsenceNotificationEmails = async (
         to: student.email,
         subject: `Absence Notification - ${classData?.course_code || "Course"}`,
         html: personalizedTemplate,
-        studentId: student.student_id,
+        studentId: student.id,
+        sessionId: sessionId,
         studentName: student.name
       });
     }
@@ -80,11 +81,21 @@ export const sendAbsenceNotificationEmails = async (
       };
     }
 
+    console.log(
+      "EMAIL PAYLOAD CHECK",
+      emailsToSend.map(e => ({
+        to: e.to,
+        studentId: e.studentId,
+        sessionId: e.sessionId
+      }))
+    );
+
     // PRODUCTION MODE: Call Supabase Edge Function to send emails
     const { data, error } = await supabase.functions.invoke('send-absence-email', {
       body: {
         emails: emailsToSend,
-        lecturerId: lecturerId
+        lecturerId: lecturerId,
+        sessionId: sessionId
       }
     });
 

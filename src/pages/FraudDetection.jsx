@@ -28,15 +28,24 @@ export default function FraudDetection() {
   const [settingsId, setSettingsId] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
 
-  // Validation handler for distance (max 1km)
+  // Validation handler for distance (min 0.01km, max 0.5km)
   const handleDistanceChange = (e) => {
     const value = parseFloat(e.target.value);
-    if (value > 1.0) {
-      setSnackbar({ open: true, message: "Maximum distance is 1km", severity: "warning" });
-      setDistance(1.0);
-    } else if (value < 0.1 && e.target.value !== "") {
-      setSnackbar({ open: true, message: "Minimum distance is 0.1km", severity: "warning" });
-      setDistance(0.1);
+
+    if (value > 0.5) {
+      setSnackbar({
+        open: true,
+        message: "Maximum distance is 0.5 km",
+        severity: "warning",
+      });
+      setDistance(0.5);
+    } else if (value < 0.01 && e.target.value !== "") {
+      setSnackbar({
+        open: true,
+        message: "Minimum distance is 0.01 km",
+        severity: "warning",
+      });
+      setDistance(0.01);
     } else {
       setDistance(e.target.value);
     }
@@ -148,7 +157,7 @@ export default function FraudDetection() {
             <CardContent>
               <Box mb={2}>
                 <InputLabel htmlFor="distance" sx={{ mb: 1, display: "block", color: "text.secondary" }}>
-                  Max Distance (km) - Max: 1km
+                  Max Distance (km) - Max: 0.5km
                 </InputLabel>
                 <Box display="flex" gap={1}>
                   <TextField
@@ -156,7 +165,7 @@ export default function FraudDetection() {
                     type="number"
                     value={distance === null ? "" : distance}
                     onChange={handleDistanceChange}
-                    inputProps={{ min: 0.05, max: 1.0, step: 0.05 }}
+                    inputProps={{ min: 0.01, max: 0.5, step: 0.01 }}
                     size="small"
                     sx={{ flex: 1, "& .MuiOutlinedInput-root": { backgroundColor: "#fff" } }}
                     disabled={distance === null}

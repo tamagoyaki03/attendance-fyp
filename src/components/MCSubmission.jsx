@@ -296,10 +296,13 @@ export default function MCSubmissions({ onChanged }) {
           }
         } else {
           // Insert new excused record
+          const local = new Date();
+          const fakeUtc = new Date(local.getTime() + 8 * 60 * 60 * 1000);
+
           const attendanceRecord = {
             session_id: sessionId,
             status: 'excused',
-            created_at: createdAt
+            created_at: fakeUtc.toISOString(),
           };
           if (isLecture) {
             attendanceRecord.lecture_enrollment_id = enrollmentId;
@@ -383,9 +386,7 @@ export default function MCSubmissions({ onChanged }) {
           <div style="font-family: Arial, sans-serif; color:#0f172a;">
             <p>Dear ${studentName},</p>
             <p>Your absence document for <strong>${courseLabel}</strong> on <strong>${absenceDateLabel}</strong> has been <span style="color:#ef4444; font-weight:bold;">rejected</span>.</p>
-            ${reasonText}
-            ${lecturerReason}
-            <p>Please review the submission requirements and resubmit with a valid Medical Certificate (MC) or Absence Letter if applicable.</p>
+            ${reasonText} ${lecturerReason}
             <p>If you believe this is a mistake, kindly contact your lecturer or the Student Affairs Office.</p>
             <br/>
             <p>Regards,<br/>Attendance Management System</p>

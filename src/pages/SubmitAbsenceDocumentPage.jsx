@@ -29,6 +29,7 @@ export default function SubmitAbsenceDocumentPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
   const [submittedData, setSubmittedData] = useState(null);
+  const [submissionError, setSubmissionError] = useState(null);
 
   const inputSx = {
     "& .MuiOutlinedInput-root": {
@@ -65,20 +66,29 @@ export default function SubmitAbsenceDocumentPage() {
         setSessionId(sessId);
         (async () => {
           try {
-            const { data, error } = await supabase
+            // Try course_lecture first
+            let { data, error } = await supabase
               .from('attendance_session')
               .select(`
                 course_lecture:course_lecture_id (
+                  course_code,
+                  course_title
+                ),
+                course_tutorial:course_tutorial_id (
                   course_code,
                   course_title
                 )
               `)
               .eq('id', sessId)
               .single();
-            
-            if (!error && data?.course_lecture) {
-              const courseInfo = `${data.course_lecture.course_code} - ${data.course_lecture.course_title}`;
-              setCourse(courseInfo);
+            if (!error && data) {
+              if (data.course_lecture) {
+                const courseInfo = `${data.course_lecture.course_code} - ${data.course_lecture.course_title}`;
+                setCourse(courseInfo);
+              } else if (data.course_tutorial) {
+                const courseInfo = `${data.course_tutorial.course_code} - ${data.course_tutorial.course_title}`;
+                setCourse(courseInfo);
+              }
             }
           } catch {
             // Error fetching session info handled silently
@@ -185,15 +195,21 @@ export default function SubmitAbsenceDocumentPage() {
         ]);
 
       if (insertError) {
-        toast.error(insertError?.message || "Failed to save absence submission. Please try again.");
+        if (insertError.code === "23505" || insertError.status === 409) {
+          setSubmissionError({
+            title: "Submission Already Exists",
+            message: "You have already submitted an absence document for this session.",
+          });
+        } else {
+          setSubmissionError({
+            title: "Submission Failed",
+            message: insertError.message || "Unable to submit absence document. Please try again later.",
+          });
+        }
+
         setIsSubmitting(false);
         return;
       }
-
-      toast.success("Your absence document has been submitted successfully!", {
-        autoClose: 5000,
-        position: "top-center"
-      });
 
       // No need to fetch matric_number again, studentId is already matric_number
       let matricNumber = studentId;
@@ -274,9 +290,7 @@ export default function SubmitAbsenceDocumentPage() {
           
           {submittedData && (
             <Box sx={{ bgcolor: "white", p: 3, borderRadius: 1, border: "1px solid #d1fae5" }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                <strong>Student ID:</strong> {submittedData.matricNumber}
-              </Typography>
+              {/* Student ID removed from dialog */}
               {submittedData.studentName && (
                 <Typography variant="body2" color="text.secondary" gutterBottom>
                   <strong>Name:</strong> {submittedData.studentName}
@@ -298,6 +312,60 @@ export default function SubmitAbsenceDocumentPage() {
               </Typography>
             </Box>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={submissionError !== null}
+        onClose={() => setSubmissionError(null)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: "#fef2f2",
+            border: "2px solid #ef4444",
+            boxShadow: "0 6px 18px rgba(239,68,68,0.15)",
+            borderRadius: 2,
+          },
+        }}
+      >
+        <DialogContent sx={{ p: 4 }}>
+          <Box display="flex" flexDirection="column" alignItems="center" textAlign="center">
+            <Box
+              sx={{
+                width: 64,
+                height: 64,
+                borderRadius: "50%",
+                bgcolor: "#ef4444",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                mb: 2,
+              }}
+            >
+              <Typography variant="h3" color="white">✕</Typography>
+            </Box>
+
+            <Typography variant="h5" fontWeight="bold" color="#b91c1c" gutterBottom>
+              {submissionError?.title}
+            </Typography>
+
+            <Typography variant="body2" color="text.secondary" mb={3}>
+              {submissionError?.message}
+            </Typography>
+
+            <Button
+              variant="contained"
+              onClick={() => setSubmissionError(null)}
+              sx={{
+                backgroundColor: "#ef4444",
+                textTransform: "none",
+                "&:hover": { backgroundColor: "#dc2626" },
+              }}
+            >
+              Close
+            </Button>
+          </Box>
         </DialogContent>
       </Dialog>
 
@@ -342,16 +410,7 @@ export default function SubmitAbsenceDocumentPage() {
                   disabled={!!sessionId}
                 />
 
-              {/* Student ID (required, used for database insert) */}
-              <TextField
-                fullWidth
-                label="Student ID"
-                value={studentId}
-                onChange={(e) => setStudentId(e.target.value)}
-                required
-                sx={{ ...inputSx }}
-                helperText="Enter your student ID"
-              />
+              {/* Student ID field removed from form */}
 
 
               <LocalizationProvider dateAdapter={AdapterDateFns}>

@@ -207,58 +207,64 @@ export default function ScheduleInput({
 
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         <Box display="flex" gap={2} mb={2}>
-          <DatePicker
-            label="Start Date"
-            value={formData.startDate || formData.start_date || null}
-            onChange={(newVal) => {
-              handleField({ startDate: newVal });
-              setTouched((prev) => ({ ...prev, start_date: true }));
-              const error = validateField("start_date", newVal);
-              setValidationErrors((prev) => {
-                const newErrors = { ...prev };
-                if (error) newErrors.start_date = error;
-                else delete newErrors.start_date;
-                return newErrors;
-              });
-            }}
-            slotProps={{
-              textField: {
-                size: "small",
-                error: touched.start_date && !!validationErrors.start_date,
-                helperText: touched.start_date && validationErrors.start_date,
-                sx: {
-                  backgroundColor: "#ffffff",
-                  "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+          <Box flex={1}>
+            <DatePicker
+              label="Start Date"
+              value={formData.startDate || formData.start_date || null}
+              onChange={(newVal) => {
+                handleField({ startDate: newVal });
+                setTouched((prev) => ({ ...prev, start_date: true }));
+                const error = validateField("start_date", newVal);
+                setValidationErrors((prev) => {
+                  const newErrors = { ...prev };
+                  if (error) newErrors.start_date = error;
+                  else delete newErrors.start_date;
+                  return newErrors;
+                });
+              }}
+              slotProps={{
+                textField: {
+                  size: "small",
+                  fullWidth: true,
+                  error: touched.start_date && !!validationErrors.start_date,
+                  helperText: touched.start_date && validationErrors.start_date,
+                  sx: {
+                    backgroundColor: "#ffffff",
+                    "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+                  },
                 },
-              },
-            }}
-          />
-          <DatePicker
-            label="End Date"
-            value={formData.endDate || formData.end_date || null}
-            onChange={(newVal) => {
-              handleField({ endDate: newVal });
-              setTouched((prev) => ({ ...prev, end_date: true }));
-              const error = validateField("end_date", newVal);
-              setValidationErrors((prev) => {
-                const newErrors = { ...prev };
-                if (error) newErrors.end_date = error;
-                else delete newErrors.end_date;
-                return newErrors;
-              });
-            }}
-            slotProps={{
-              textField: {
-                size: "small",
-                error: touched.end_date && !!validationErrors.end_date,
-                helperText: touched.end_date && validationErrors.end_date,
-                sx: {
-                  backgroundColor: "#ffffff",
-                  "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+              }}
+            />
+          </Box>
+          <Box flex={1}>
+            <DatePicker
+              label="End Date"
+              value={formData.endDate || formData.end_date || null}
+              onChange={(newVal) => {
+                handleField({ endDate: newVal });
+                setTouched((prev) => ({ ...prev, end_date: true }));
+                const error = validateField("end_date", newVal);
+                setValidationErrors((prev) => {
+                  const newErrors = { ...prev };
+                  if (error) newErrors.end_date = error;
+                  else delete newErrors.end_date;
+                  return newErrors;
+                });
+              }}
+              slotProps={{
+                textField: {
+                  size: "small",
+                  fullWidth: true,
+                  error: touched.end_date && !!validationErrors.end_date,
+                  helperText: touched.end_date && validationErrors.end_date,
+                  sx: {
+                    backgroundColor: "#ffffff",
+                    "& .MuiOutlinedInput-notchedOutline": { borderColor: "#e6edf3" },
+                  },
                 },
-              },
-            }}
-          />
+              }}
+            />
+          </Box>
         </Box>
       </LocalizationProvider>
 

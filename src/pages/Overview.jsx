@@ -175,6 +175,21 @@ export default function Overview() {
    }
  }, []);
 
+ useEffect(() => {
+  if (!user?.id) return;
+  if (user.role !== "admin") return;
+
+  const runArchive = async () => {
+    console.log("[AUTO-ARCHIVE] Admin dashboard loaded → archiving ended classes");
+    const { error } = await supabase.rpc("archive_expired_classes");
+    if (error) {
+      console.error("Archive RPC failed:", error);
+    }
+  };
+
+  runArchive();
+}, [user?.id, user?.role]);
+
   useEffect(() => {
     if (!user?.id) {
       // nothing to fetch yet

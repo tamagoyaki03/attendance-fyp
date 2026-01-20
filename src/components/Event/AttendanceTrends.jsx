@@ -121,6 +121,8 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
             return {
               date: format(month, "MMM"),
               attendance: rate,
+              totalPossible,
+              presentCount,
             };
           });
         } else {
@@ -149,6 +151,8 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
             return {
               date: format(day, "MMM d"),
               attendance: rate,
+              totalPossible,
+              presentCount,
             };
           });
         }
@@ -180,6 +184,22 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
     );
   }
 
+  // Custom tooltip to show attendance rate, total possible, and actual attendees
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const point = payload[0].payload;
+      return (
+        <Box sx={{ p: 2, background: isDark ? theme.palette.background.paper : '#fff', border: `1px solid ${isDark ? theme.palette.divider : '#ddd'}` }}>
+          <Box fontWeight={600} mb={0.5}>{label}</Box>
+          <Box color={theme.palette.primary.main} fontWeight={500} mb={0.5}>Attendance Rate: {point.attendance}%</Box>
+          <Box color={theme.palette.text.secondary} fontSize={13} mb={0.5}>Actual Attendees: {point.presentCount}</Box>
+          <Box color={theme.palette.text.secondary} fontSize={13}>Total Possible: {point.totalPossible}</Box>
+        </Box>
+      );
+    }
+    return null;
+  };
+
   return (
     <ResponsiveContainer width="100%" height={400}>
       <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
@@ -198,14 +218,7 @@ export default function AttendanceTrends({ timeRange = "30days" }) {
           domain={[0, 100]}
           tickFormatter={(value) => `${value}%`}
         />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: isDark ? theme.palette.background.paper : "#fff",
-            color: isDark ? theme.palette.text.primary : "#333",
-            border: `1px solid ${isDark ? theme.palette.divider : "#ddd"}`,
-          }}
-          formatter={(value) => [`${value}%`, "Attendance"]}
-        />
+        <Tooltip content={<CustomTooltip />} />
         <Legend />
         <Line
           type="monotone"

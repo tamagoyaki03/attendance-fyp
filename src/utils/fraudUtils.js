@@ -75,14 +75,13 @@ async function getSessionContext(sessionId) {
     }
   }
 
-  // Build session window
-  const startIso = session.date && session.start_time ? `${session.date}T${session.start_time}` : null;
-  const endIso = session.date && session.end_time ? `${session.date}T${session.end_time}` : null;
-  const start = startIso ? new Date(startIso) : null;
-  let end = endIso ? new Date(endIso) : null;
-  if (start && !end) {
-    // Fallback to 2-hour window if end_time missing
-    end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    const startIso = `${session.date}T${session.start_time}Z`;
+    const endIso   = `${session.date}T${session.end_time}Z`;
+    const start = startIso ? new Date(startIso) : null;
+    let end = endIso ? new Date(endIso) : null;
+    if (start && !end) {
+      // Fallback to 2-hour window if end_time missing
+      end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
   }
 
   return { classInfo, classType, courseCode, enrollmentMap, start, end };
@@ -148,11 +147,24 @@ async function upsertIssue({
 }
 
 async function analyzeRecord(sessionId, record, ctx, opts) {
+  if (record.status === "excused") {
+    return [];
+  }
+  if (!record.session_id) {
+    return [];
+  }
+
   const issues = [];
   const { classInfo, enrollmentMap, start, end } = ctx;
-  const { maxKm = 1.0, timeBufferMinutes = 5 } = opts || {};
+  const { maxKm = 1.0 } = opts || {};
+  // Parse timeBufferMinutes as integer, fallback to 1 if invalid
+  let timeBufferMinutes = 1;
+  if (opts && opts.timeBufferMinutes !== undefined && opts.timeBufferMinutes !== null) {
+    const parsed = parseInt(opts.timeBufferMinutes, 10);
+    timeBufferMinutes = isNaN(parsed) ? 1 : parsed;
+  }
 
-
+  // Use UTC date directly; JS Date handles the offset for comparison
   const created = record?.created_at ? new Date(record.created_at) : null;
   const reasons = [];
 
@@ -202,23 +214,25 @@ async function analyzeRecord(sessionId, record, ctx, opts) {
     }
   }
 
-  // Time anomaly detection
+  // Time anomaly detection 
   let hasTimeAnomaly = false;
   let isEarly = false;
-  if (start && end && created) {
-    const early = new Date(start.getTime() - timeBufferMinutes * 60 * 1000);
-    const late = new Date(end.getTime() + timeBufferMinutes * 60 * 1000);
-    if (created < early || created > late) {
-      isEarly = created < early;
+
+  if (start && created) {
+    const latenessMinutes = (created - start) / (1000 * 60);
+    const graceMinutes = opts?.latenessGraceMinutes ?? 3;
+
+    // Early check-in (before session start)
+    if (created < start) {
       hasTimeAnomaly = true;
-      issues.push({
-        type: "Time Anomaly",
-        description: `Check-in at ${created.toISOString()} outside session window (${start.toISOString()} - ${end.toISOString()}).`,
-      });
-      // Only show late check-ins, not early - and prevent duplicates
-      if (!isEarly && !reasons.includes(`Late for Check In`)) {
-        reasons.push(`Late for Check In`);
-      }
+      isEarly = true;
+      reasons.push("Early Check In");
+    }
+
+    // Late beyond grace period
+    if (latenessMinutes > graceMinutes) {
+      hasTimeAnomaly = true;
+      reasons.push("Late for Check In");
     }
   }
 
@@ -270,6 +284,16 @@ async function analyzeRecord(sessionId, record, ctx, opts) {
     }
   }
   
+  // Clear previous flag if no anomaly now
+  if (!reasons.length && record?.id) {
+    await supabase
+      .from("attendance_record")
+      .update({
+        status: "present",
+        flag_reason: null
+      })
+      .eq("id", record.id);
+  }
 
   return issues;
 }

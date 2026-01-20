@@ -1,3 +1,4 @@
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import React, { useState, useEffect } from "react";
 import {
   Alert, AlertTitle, Card, CardContent, CardHeader, Typography, Button, Divider, Box, Tabs, Tab, Chip, CardActions,
@@ -18,6 +19,7 @@ import supabase from "../config/supabaseClient";
 import * as XLSX from 'xlsx';
 
 export default function StudentDetailsCard({ student, open, onClose, classData }) {
+  const [attendanceIssueDetails, setAttendanceIssueDetails] = useState(null);
   const [activeTab, setActiveTab] = useState(0);
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -29,6 +31,27 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
   const [currentAttendanceRecord, setCurrentAttendanceRecord] = useState(student?.attendanceRecord || null);
   // Get session start time from student object (pre-fetched in AttendanceManagement)
   const sessionStartTime = student?.sessionStartTime || null;
+  
+  // Fetch attendance issue details if attendance_issue_id is present
+  useEffect(() => {
+    const fetchIssue = async () => {
+      if (currentAttendanceRecord?.attendance_issue_id) {
+        const { data, error } = await supabase
+          .from('attendance_issues')
+          .select('issue_type, description, status, created_at')
+          .eq('id', currentAttendanceRecord.attendance_issue_id)
+          .maybeSingle();
+        if (!error && data) {
+          setAttendanceIssueDetails(data);
+        } else {
+          setAttendanceIssueDetails(null);
+        }
+      } else {
+        setAttendanceIssueDetails(null);
+      }
+    };
+    fetchIssue();
+  }, [currentAttendanceRecord?.attendance_issue_id]);
 
   // Update local state when student prop changes
   useEffect(() => {
@@ -485,7 +508,7 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
   const formatUtcTime = (dateString) => {
     if (!dateString) return "-";
     const date = new Date(dateString);
-    return date.toLocaleString("en-US", { timeZone: "UTC", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " UTC";
+    return date.toLocaleString("en-US", { timeZone: "UTC", year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   };
 
   return (
@@ -585,61 +608,76 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
 
                    {/* Time Analysis and Location Verification - Side by Side */}
                    <Box display="grid" gridTemplateColumns={{ xs: "1fr", md: "1fr 1fr" }} gap={3} mb={3}>
-                     {/* Time Analysis */}
-                     {sessionStartTime && currentAttendanceRecord?.created_at && (
+                     {/* Time Analysis: Only for status 'present' and attendance_type 'physical' */}
+                     {(!currentAttendanceRecord?.attendance_issue_id &&
+                       sessionStartTime &&
+                       currentAttendanceRecord?.created_at &&
+                       currentAttendanceRecord?.status === "present" &&
+                       (currentAttendanceRecord?.attendance_type === "physical" || !currentAttendanceRecord?.attendance_type)) ? (
                        <Box>
                          <Typography variant="h6" gutterBottom>
                            <AccessTimeIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
                            Time Analysis
                          </Typography>
-                       {(() => {
-                         const sessionStart = new Date(sessionStartTime);
-                         const checkInTime = new Date(currentAttendanceRecord.created_at);
-                         const timeDiffMinutes = Math.round((checkInTime - sessionStart) / (1000 * 60));
-                         const isLate = timeDiffMinutes > timeBufferMinutes; // Use dynamic time buffer from database
-                         const isEarly = timeDiffMinutes < -5; // Early if checked in more than 5 minutes before start
+                         {(() => {
+                           const sessionStart = new Date(sessionStartTime);
+                           const checkInTime = new Date(currentAttendanceRecord.created_at);
+                           const timeDiffMinutes = Math.round((checkInTime - sessionStart) / (1000 * 60));
+                           const isLate = timeDiffMinutes > timeBufferMinutes; // Use dynamic time buffer from database
+                           const isEarly = timeDiffMinutes < -5; // Early if checked in more than 5 minutes before start
 
-                         return (
-                           <Box>
-                             <Alert
-                               severity={isLate ? "warning" : isEarly ? "info" : "success"}
-                               sx={{ mb: 2 }}
-                             >
-                               <AlertTitle>
+                           return (
+                             <Box>
+                               <Alert
+                                 severity={isLate ? "warning" : isEarly ? "info" : "success"}
+                                 sx={{ mb: 2 }}
+                               >
+                                 <AlertTitle>
+                                   {isLate 
+                                     ? "Late Check-in" 
+                                     : isEarly 
+                                     ? "Early Check-in" 
+                                     : "On-time Check-in"}
+                                 </AlertTitle>
                                  {isLate 
-                                   ? "Late Check-in" 
-                                   : isEarly 
-                                   ? "Early Check-in" 
-                                   : "On-time Check-in"}
-                               </AlertTitle>
-                               {isLate 
-                                 ? `Checked in ${Math.abs(timeDiffMinutes)} minutes after session start` 
-                                 : isEarly
-                                 ? `Checked in ${Math.abs(timeDiffMinutes)} minutes before session start`
-                                 : timeDiffMinutes >= 0
-                                 ? `Checked in ${timeDiffMinutes} minutes after session start (within acceptable range)`
-                                 : "Checked in on time"}
-                             </Alert>
+                                   ? `Checked in ${Math.abs(timeDiffMinutes)} minutes after session start` 
+                                   : isEarly
+                                   ? `Checked in ${Math.abs(timeDiffMinutes)} minutes before session start`
+                                   : timeDiffMinutes >= 0
+                                   ? `Checked in ${timeDiffMinutes} minutes after session start (within acceptable range)`
+                                   : "Checked in on time"}
+                               </Alert>
 
-                             <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
-                               <Box>
-                                 <Typography variant="body2" color="text.secondary">Session Start Time</Typography>
-                                 <Typography variant="body2" fontWeight="bold">
-                                   {sessionStartTime?.match(/T(\d{2}:\d{2}:\d{2})/) 
-                                     ? sessionStartTime.match(/T(\d{2}:\d{2}:\d{2})/)[1] 
-                                     : sessionStartTime}
-                                 </Typography>
-                               </Box>
-                               <Box>
-                                 <Typography variant="body2" color="text.secondary">Time Difference</Typography>
-                                 <Typography variant="body2" fontWeight="bold" color={isLate ? "error.main" : "text.primary"}>
-                                   {timeDiffMinutes > 0 ? "+" : ""}{timeDiffMinutes} minutes
-                                 </Typography>
+                               <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
+                                 <Box>
+                                   <Typography variant="body2" color="text.secondary">Session Start Time</Typography>
+                                   <Typography variant="body2" fontWeight="bold">
+                                     {sessionStartTime?.match(/T(\d{2}:\d{2}:\d{2})/) 
+                                       ? sessionStartTime.match(/T(\d{2}:\d{2}:\d{2})/)[1] 
+                                       : sessionStartTime}
+                                   </Typography>
+                                 </Box>
+                                 <Box>
+                                   <Typography variant="body2" color="text.secondary">Time Difference</Typography>
+                                   <Typography variant="body2" fontWeight="bold" color={isLate ? "error.main" : "text.primary"}>
+                                     {timeDiffMinutes > 0 ? "+" : ""}{timeDiffMinutes} minutes
+                                   </Typography>
+                                 </Box>
                                </Box>
                              </Box>
-                           </Box>
-                         );
-                       })()}
+                           );
+                         })()}
+                       </Box>
+                     ) : (
+                       <Box>
+                         <Typography variant="h6" gutterBottom>
+                           <AccessTimeIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                           Time Analysis
+                         </Typography>
+                         <Alert severity="info" sx={{ mb: 2 }}>
+                           <AlertTitle>Not Available</AlertTitle>
+                           Time analysis not available for this status.
+                         </Alert>
                        </Box>
                      )}
 
@@ -705,54 +743,92 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                          Online Verification Details
                        </Typography>
 
-                       <Box display="grid" gridTemplateColumns="1fr 1fr 1fr" gap={2}>
-                         <Card variant="outlined">
-                           <CardContent sx={{ textAlign: 'center' }}>
-                             <TryIcon color="primary" sx={{ fontSize: 32, mb: 1 }} />
-                             <Typography variant="h6" fontWeight="bold">
-                               {currentAttendanceRecord.verification_data.attempts || 0}
-                             </Typography>
-                             <Typography variant="body2" color="text.secondary">
-                               Quiz Attempts
-                             </Typography>
-                           </CardContent>
-                         </Card>
+                       <Box
+                         display="flex"
+                         flexWrap="wrap"
+                         gap={2}
+                         justifyContent={{ xs: 'center', md: 'flex-start' }}
+                         alignItems="stretch"
+                         sx={{ mt: 1 }}
+                       >
+                         {Object.entries(currentAttendanceRecord.verification_data).map(([key, value]) => {
+                           let icon = null;
+                           if (key === 'attempts') icon = <TryIcon color="primary" sx={{ fontSize: 36, mb: 1 }} />;
+                           else if (key === 'quiz_score') icon = <QuizIcon color="success" sx={{ fontSize: 36, mb: 1 }} />;
+                           else if (key === 'watch_time') icon = <PlayCircleIcon color="info" sx={{ fontSize: 36, mb: 1 }} />;
+                           else if (key === 'verification_type') icon = <QuizIcon color="secondary" sx={{ fontSize: 36, mb: 1 }} />;
 
-                         <Card variant="outlined">
-                           <CardContent sx={{ textAlign: 'center' }}>
-                             <QuizIcon color="success" sx={{ fontSize: 32, mb: 1 }} />
-                             <Typography variant="h6" fontWeight="bold">
-                               {currentAttendanceRecord.verification_data.quiz_score || 0}%
-                             </Typography>
-                             <Typography variant="body2" color="text.secondary">
-                               Quiz Score
-                             </Typography>
-                           </CardContent>
-                         </Card>
+                           // Card color accent for key types
+                           let borderColor = '#e2e8f0';
+                           if (key === 'quiz_score') borderColor = '#22c55e';
+                           else if (key === 'attempts') borderColor = '#3b82f6';
+                           else if (key === 'watch_time') borderColor = '#0ea5e9';
+                           else if (key === 'verification_type') borderColor = '#a855f7';
 
-                         <Card variant="outlined">
-                           <CardContent sx={{ textAlign: 'center' }}>
-                             <PlayCircleIcon color="info" sx={{ fontSize: 32, mb: 1 }} />
-                             <Typography variant="h6" fontWeight="bold">
-                               {Math.round((currentAttendanceRecord.verification_data.watch_time || 0) / 60)}m
-                             </Typography>
-                             <Typography variant="body2" color="text.secondary">
-                               Watch Time
-                             </Typography>
-                           </CardContent>
-                         </Card>
+                           // Fix watch_time display: always show at least 1m if value >= 1
+                           let displayValue = value;
+                           if (typeof value === 'number' && key === 'watch_time') {
+                             displayValue = value < 1 ? '0m' : `${Math.max(1, Math.round(value / 60))}m`;
+                           }
+
+                           return (
+                             <Card
+                               variant="outlined"
+                               key={key}
+                               sx={{
+                                 minWidth: 180,
+                                 flex: '1 1 180px',
+                                 borderRadius: 3,
+                                 borderWidth: 2,
+                                 borderColor,
+                                 boxShadow: '0 2px 8px 0 rgba(16,30,54,0.06)',
+                                 background: 'linear-gradient(135deg, #f8fafc 60%, #f1f5f9 100%)',
+                                 display: 'flex',
+                                 flexDirection: 'column',
+                                 alignItems: 'center',
+                                 justifyContent: 'center',
+                                 py: 2,
+                               }}
+                             >
+                               {icon}
+                               <Typography
+                                 variant="caption"
+                                 color="text.secondary"
+                                 sx={{ textTransform: 'capitalize', letterSpacing: 0.5, mt: 1 }}
+                               >
+                                 {key.replace(/_/g, ' ')}
+                               </Typography>
+                               <Typography
+                                 variant="h5"
+                                 fontWeight="bold"
+                                 sx={{ mt: 1, color: '#0f172a' }}
+                               >
+                                 {displayValue}
+                               </Typography>
+                             </Card>
+                           );
+                         })}
                        </Box>
 
-                       {currentAttendanceRecord.verification_data.quiz_score < 60 && (
-                         <Alert severity="warning" sx={{ mt: 2 }}>
-                           <AlertTitle>Low Quiz Score</AlertTitle>
-                           Student scored below 60% on the attendance verification quiz.
-                         </Alert>
-                       )}
+                       {/* Quiz score warning removed as requested */}
                      </Box>
                    )}
 
-                   {/* Additional Record Details */}
+                   {/* Attendance Issue Details if present */}
+                   {attendanceIssueDetails && (
+                     <Box mb={3}>
+                       <Typography variant="h6" gutterBottom color="error">
+                         <ReportProblemIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                         Attendance Issue Details
+                       </Typography>
+                       <Box sx={{ p: 2, bgcolor: 'orange.50', borderRadius: 1, border: '1px solid #ff9800' }}>
+                         <Typography variant="body2"><strong>Issue Type:</strong> {attendanceIssueDetails.issue_type}</Typography>
+                         <Typography variant="body2"><strong>Description:</strong> {attendanceIssueDetails.description}</Typography>
+                         <Typography variant="body2"><strong>Status:</strong> {attendanceIssueDetails.status}</Typography>
+                         <Typography variant="body2"><strong>Created At:</strong> {formatUtcTime(attendanceIssueDetails.created_at)}</Typography>
+                       </Box>
+                     </Box>
+                   )}
                    {currentAttendanceRecord?.notes && (
                      <Box mb={3}>
                        <Typography variant="h6" gutterBottom>Notes</Typography>

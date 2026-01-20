@@ -41,6 +41,7 @@ export default function LeaveRequestList({ onChanged }) {
   const [tabValue, setTabValue] = useState(0);
   const [snackbar, setSnackbar] = useState({ open: false, message: "" });
   const [loading, setLoading] = useState(true);
+  const [approving, setApproving] = useState(false);
 
   const handleViewDetails = (req) => {
     setSelectedRequest(req);
@@ -132,7 +133,8 @@ export default function LeaveRequestList({ onChanged }) {
       };
     });
 
-    setRequests(enriched);
+    // Sort by leave period (date_time) ascending using the original date_time field
+    setRequests(enriched.sort((a, b) => new Date(a.date_time) - new Date(b.date_time)));
     setLoading(false);
   };
 
@@ -144,104 +146,183 @@ export default function LeaveRequestList({ onChanged }) {
   );
 
   const handleApprove = async (id) => {
+    if (approving) return;
+    setApproving(true);
+
     try {
-      const { error } = await supabase
+      // Update leave request (LECTURER responsibility)
+      const { data, error } = await supabase
         .from("leave_requests")
-        .update({ status: "approved" })
-        .eq("id", id);
-      if (error) {
-        // Error handling
-      }
-      // Also create excused attendance records for sessions on the leave date for this lecturer's courses
+        .update({
+          status: "approved",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .select();
+
+      console.log("UPDATE RESULT:", { data, error });
+
       const req = requests.find(r => r.id === id);
       const lecturer = JSON.parse(sessionStorage.getItem("user") || "null");
-      if (req && lecturer?.id && req.user_id && req.date_time) {
-        const leaveDate = new Date(req.date_time);
-        // Build day range [start, end) in ISO for created_at and a date-only string for date column
-        const start = new Date(leaveDate);
-        start.setHours(0,0,0,0);
-        const end = new Date(start);
-        end.setDate(end.getDate() + 1);
-        const startIso = start.toISOString();
-        const endIso = end.toISOString();
-        const dateOnly = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+      if (!req || !lecturer?.id || !req.user_id || !req.date_time) return;
 
-        // Fetch lecturer courses
-        const [lecRes, tutRes] = await Promise.all([
-          supabase.from("course_lecture").select("id").eq("lecturer_id", lecturer.id),
-          supabase.from("course_tutorial").select("id").eq("lecturer_id", lecturer.id)
-        ]);
-        const lectureIds = (lecRes.data || []).map(c => c.id);
-        const tutorialIds = (tutRes.data || []).map(c => c.id);
+      // Build LOCAL day window
+      const leaveDate = new Date(req.date_time);
 
-        if (lectureIds.length + tutorialIds.length > 0) {
-          // Sessions matching courses AND falling on the same local day
-          let sessionQuery = supabase
-            .from("attendance_session")
-            .select("id, course_lecture_id, course_tutorial_id, date, created_at");
-          const courseOr = [];
-          if (lectureIds.length > 0) courseOr.push(`course_lecture_id.in.(${lectureIds.join(',')})`);
-          if (tutorialIds.length > 0) courseOr.push(`course_tutorial_id.in.(${tutorialIds.join(',')})`);
-          if (courseOr.length > 0) sessionQuery = sessionQuery.or(courseOr.join(','));
-          // date column may be populated OR we fallback to created_at range
-          sessionQuery = sessionQuery.or(`date.eq.${dateOnly},and(created_at.gte.${startIso},created_at.lt.${endIso})`);
-          const { data: sessions, error: sessErr } = await sessionQuery;
-          if (!sessErr && Array.isArray(sessions) && sessions.length > 0) {
-            // Fetch the student's enrollments for those courses
-            const [stuLecEnr, stuTutEnr] = await Promise.all([
-              lectureIds.length > 0
-                ? supabase.from("enrollment_lecture").select("id, course_id").eq("student_id", req.user_id).in("course_id", lectureIds)
-                : Promise.resolve({ data: [] }),
-              tutorialIds.length > 0
-                ? supabase.from("enrollment_tutorial").select("id, tutorial_id").eq("student_id", req.user_id).in("tutorial_id", tutorialIds)
-                : Promise.resolve({ data: [] })
-            ]);
-            const lecEnrollMap = new Map((stuLecEnr.data || []).map(e => [e.course_id, e.id]));
-            const tutEnrollMap = new Map((stuTutEnr.data || []).map(e => [e.tutorial_id, e.id]));
+      const start = new Date(leaveDate);
+      start.setHours(0, 0, 0, 0);
 
-            // Prepare inserts for each matching session
-            const inserts = [];
-            for (const s of sessions) {
-              if (s.course_lecture_id && lecEnrollMap.has(s.course_lecture_id)) {
-                inserts.push({
-                  session_id: s.id,
-                  lecture_enrollment_id: lecEnrollMap.get(s.course_lecture_id),
-                  status: "excused",
-                  created_at: new Date().toISOString(), // store in UTC
-                });
-              } else if (s.course_tutorial_id && tutEnrollMap.has(s.course_tutorial_id)) {
-                inserts.push({
-                  session_id: s.id,
-                  tutorial_enrollment_id: tutEnrollMap.get(s.course_tutorial_id),
-                  status: "excused",
-                  created_at: new Date().toISOString(), // store in UTC
-                });
-              }
-            }
-            if (inserts.length > 0) {
-              const { error: insErr } = await supabase.from("attendance_record").insert(inserts);
-              if (insErr) {
-                setSnackbar({ open: true, message: `Failed to add excused attendance: ${insErr.message || 'RLS or validation failed'}` });
-              } else {
-                setSnackbar({ open: true, message: "Excused attendance recorded." });
-              }
-            } else {
-              // No matching sessions/enrollments found on that date
-              setSnackbar({ open: true, message: "No matching sessions/enrollments found for leave date." });
-            }
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+
+      const dateOnly = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
+
+      // Fetch lecturer courses
+      const [lecRes, tutRes] = await Promise.all([
+        supabase.from("course_lecture").select("id").eq("lecturer_id", lecturer.id),
+        supabase.from("course_tutorial").select("id").eq("lecturer_id", lecturer.id),
+      ]);
+
+      const lectureIds = (lecRes.data || []).map(c => c.id);
+      const tutorialIds = (tutRes.data || []).map(c => c.id);
+
+      // Fetch student enrollments
+      const [stuLec, stuTut] = await Promise.all([
+        lectureIds.length
+          ? supabase.from("enrollment_lecture").select("id, course_id")
+              .eq("student_id", req.user_id)
+              .in("course_id", lectureIds)
+          : { data: [] },
+        tutorialIds.length
+          ? supabase.from("enrollment_tutorial").select("id, tutorial_id")
+              .eq("student_id", req.user_id)
+              .in("tutorial_id", tutorialIds)
+          : { data: [] }
+      ]);
+
+      const lectureEnrollmentId =
+        stuLec.data?.find(e => e.course_id === req.course_id)?.id ?? null;
+
+      const tutorialEnrollmentId =
+        stuTut.data?.find(e => e.tutorial_id === req.course_id)?.id ?? null;
+
+      const toSqlTimestamp = (d) =>
+        d.toISOString().slice(0, 19).replace("T", " ");
+
+      // Find sessions on that LOCAL day
+      let sessionQuery = supabase
+        .from("attendance_session")
+        .select("id, course_lecture_id, course_tutorial_id, date, created_at")
+        .eq("date", dateOnly)
+        .gte("created_at", toSqlTimestamp(start))
+        .lt("created_at", toSqlTimestamp(end));
+
+      if (req.course_id) {
+        sessionQuery = sessionQuery.or(
+          `course_lecture_id.eq.${req.course_id},course_tutorial_id.eq.${req.course_id}`
+        );
+      }
+
+      const { data: sessions } = await sessionQuery;
+
+      // Insert excused attendance 
+      const local = new Date();
+      const fakeUtc = new Date(local.getTime() + 8 * 60 * 60 * 1000);
+      const inserts = [];
+
+      if (sessions?.length) {
+        for (const s of sessions) {
+          if (
+            s.course_lecture_id === req.course_id &&
+            lectureEnrollmentId
+          ) {
+            inserts.push({
+              session_id: s.id,
+              lecture_enrollment_id: lectureEnrollmentId,
+              status: "excused",
+              created_at: fakeUtc.toISOString(),
+              leave_request_id: req.id
+            });
+          }
+
+          if (
+            s.course_tutorial_id === req.course_id &&
+            tutorialEnrollmentId
+          ) {
+            inserts.push({
+              session_id: s.id,
+              tutorial_enrollment_id: tutorialEnrollmentId,
+              status: "excused",
+              created_at: fakeUtc.toISOString(),
+              leave_request_id: req.id
+            });
           }
         }
       }
-    } catch {
-      // Error approving leave request handled silently
+
+      // PENDING (no sessions yet)
+      if (!sessions?.length) {
+        if (lectureEnrollmentId) {
+          inserts.push({
+            session_id: null,
+            lecture_enrollment_id: lectureEnrollmentId,
+            status: "excused",
+            created_at: fakeUtc.toISOString(),
+            leave_request_id: req.id
+          });
+        }
+
+        if (tutorialEnrollmentId) {
+          inserts.push({
+            session_id: null,
+            tutorial_enrollment_id: tutorialEnrollmentId,
+            status: "excused",
+            created_at: fakeUtc.toISOString(),
+            leave_request_id: req.id
+          });
+        }
+      }
+
+      // Split by type FIRST
+      const lectureRows = inserts.filter(r => r.lecture_enrollment_id);
+      const tutorialRows = inserts.filter(r => r.tutorial_enrollment_id);
+
+      // ---- PENDING (session_id = null) → INSERT ONLY ----
+      const pendingLecture = lectureRows.filter(r => r.session_id === null);
+      const pendingTutorial = tutorialRows.filter(r => r.session_id === null);
+
+      if (pendingLecture.length) {
+        await supabase.from("attendance_record").insert(pendingLecture);
+      }
+
+      if (pendingTutorial.length) {
+        await supabase.from("attendance_record").insert(pendingTutorial);
+      }
+
+      // ---- SESSION-BASED (session_id exists) → UPSERT ----
+      const sessionLecture = lectureRows.filter(r => r.session_id !== null);
+      const sessionTutorial = tutorialRows.filter(r => r.session_id !== null);
+
+      if (sessionLecture.length) {
+        await supabase.from("attendance_record").upsert(sessionLecture, {
+          onConflict: "lecture_enrollment_id,session_id"
+        });
+      }
+
+      if (sessionTutorial.length) {
+        await supabase.from("attendance_record").upsert(sessionTutorial, {
+          onConflict: "tutorial_enrollment_id,session_id"
+        });
+      }
+
     } finally {
-      setRequests((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: "approved" } : r))
+      setApproving(false);
+      setRequests(prev =>
+        prev.map(r => r.id === id ? { ...r, status: "approved" } : r)
       );
       setSnackbar({ open: true, message: "Leave request approved." });
       setIsDetailsOpen(false);
-      // eslint-disable-next-line no-empty
-      try { onChanged && onChanged(); } catch {}
+      onChanged?.();
     }
   };
 
@@ -253,26 +334,121 @@ export default function LeaveRequestList({ onChanged }) {
       });
       return;
     }
+
     try {
-      const { error } = await supabase
+      const req = requests.find(r => r.id === id);
+      if (!req) throw new Error("Leave request not found");
+
+      // Update leave request
+      const { error: updateError } = await supabase
         .from("leave_requests")
-        .update({ status: "rejected", rejection_reason: rejectionReason })
+        .update({
+          status: "rejected",
+          rejection_reason: rejectionReason.trim(),
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", id);
-      if (error) {
-        // Error handling
+
+      if (updateError) throw updateError;
+
+      // Fetch student contact info
+      const { data: userInfo, error: userError } = await supabase
+        .from("users")
+        .select("email, name, matric_number")
+        .eq("id", req.user_id)
+        .single();
+
+      if (userError) {
+        console.warn("Failed to fetch student info:", userError);
       }
-    } catch {
-      // Error rejecting leave request handled silently
-    } finally {
+
+      const lecturer = JSON.parse(sessionStorage.getItem("user") || "null");
+      const toEmail = userInfo?.email;
+      const studentName = userInfo?.name || "Student";
+      const studentId = req.user_id;
+
+      // Send rejection email
+      if (toEmail) {
+        const courseLabel = req.course || "Course";
+        const leaveDate = new Date(req.date_time).toLocaleDateString();
+
+        const html = `
+          <div style="font-family: Arial, sans-serif; color:#0f172a;">
+            <p>Dear ${studentName},</p>
+
+            <p>
+              Your leave request for <strong>${courseLabel}</strong>
+              on <strong>${leaveDate}</strong> has been
+              <span style="color:#ef4444; font-weight:bold;">rejected</span>.
+            </p>
+
+            <p><strong>Lecturer's Reason:</strong></p>
+            <p>${rejectionReason.trim()}</p>
+
+            <p>
+              If you believe this decision is incorrect, please contact your lecturer.
+            </p>
+
+            <br/>
+            <p>Regards,<br/>Attendance Management System</p>
+          </div>
+        `;
+
+        const { error: fnError } = await supabase.functions.invoke(
+          "send-absence-email",
+          {
+            body: {
+              emails: [
+                {
+                  to: toEmail,
+                  subject: `Leave Request Rejected - ${courseLabel}`,
+                  html,
+                  studentId,
+                  studentName,
+                },
+              ],
+              lecturerId: lecturer?.id || null,
+            },
+          }
+        );
+
+        if (fnError) {
+          setSnackbar({
+            open: true,
+            message: "Leave rejected, but email failed to send.",
+          });
+        } else {
+          setSnackbar({
+            open: true,
+            message: "Leave request rejected and email sent to student.",
+          });
+        }
+      } else {
+        setSnackbar({
+          open: true,
+          message: "Leave rejected. No student email found.",
+        });
+      }
+
+      // Update UI state
       setRequests((prev) =>
         prev.map((r) =>
-          r.id === id ? { ...r, status: "rejected", rejectionReason } : r
+          r.id === id
+            ? { ...r, status: "rejected", rejectionReason }
+            : r
         )
       );
-      setSnackbar({ open: true, message: "Leave request rejected." });
-      setIsDetailsOpen(false);
-      // eslint-disable-next-line no-empty
+
       try { onChanged && onChanged(); } catch {}
+
+    } catch (err) {
+      console.error(err);
+      setSnackbar({
+        open: true,
+        message: `Failed to reject leave request: ${err.message}`,
+      });
+    } finally {
+      setIsDetailsOpen(false);
     }
   };
 
@@ -413,8 +589,10 @@ return (
                 <Typography mt={2}><strong>Reason:</strong> {selectedRequest.reason}</Typography>
 
                 {selectedRequest.status === "rejected" && selectedRequest.rejectionReason && (
-                  <Box mt={2} p={2} bgcolor="error.light">
-                    <Typography color="error"><strong>Rejection Reason:</strong> {selectedRequest.rejectionReason}</Typography>
+                  <Box mt={2}>
+                    <Typography color="error">
+                      <strong>Rejection Reason:</strong> {selectedRequest.rejectionReason}
+                    </Typography>
                   </Box>
                 )}
 
@@ -479,11 +657,13 @@ return (
                  Reject
                </Button>
                <Button
-                 color="success"
-                 onClick={() => handleApprove(selectedRequest.id)}
-               >
-                 Approve
-               </Button>
+                  color="success"
+                  disabled={approving}
+                  onClick={() => handleApprove(selectedRequest.id)}
+                >
+                  {approving ? "Approving..." : "Approve"}
+                </Button>
+
              </>
            ) : (
              <Button onClick={() => setIsDetailsOpen(false)}>Close</Button>

@@ -607,6 +607,11 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
   };
 
   const currentLecturerName = lecturers.find(l => l.id === formData.lecturer)?.name || '';
+  const lecturerIds = lecturers.map(l => l.id);
+
+  const safeLecturerValue = lecturerIds.includes(formData.lecturer)
+    ? formData.lecturer
+    : "";
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth disablePortal={false} keepMounted={false}>
@@ -766,14 +771,14 @@ export default function EditClassDialog({ open, onClose, classData, onClassAdded
             select
             fullWidth
             name="lecturer"
-            value={formData.lecturer}
+            value={safeLecturerValue}
             onChange={handleChange}
             required
           >
             <MenuItem value="">-- Select Lecturer --</MenuItem>
-            {lecturers.map((lecturer) => (
-              <MenuItem key={lecturer.id} value={lecturer.id}>
-                {lecturer.name}
+            {lecturers.map(l => (
+              <MenuItem key={l.id} value={l.id}>
+                {l.name}
               </MenuItem>
             ))}
           </TextField>

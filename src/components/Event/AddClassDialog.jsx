@@ -778,13 +778,15 @@ const handleGeocodeLocation = async () => {
                  Online
                </Button>
                 <Tooltip title="Get coordinates for entered location">
-                  <IconButton
-                    onClick={handleGeocodeLocation}
-                    disabled={isGettingLocation || !formData.location.trim()|| formData.location.toLowerCase() === 'online'}
-                    color="primary"
-                  >
-                    {isGettingLocation ? <CircularProgress size={20} /> : <LocationOnIcon />}
-                  </IconButton>
+                  <span>
+                    <IconButton
+                      onClick={handleGeocodeLocation}
+                      disabled={isGettingLocation || !formData.location.trim()|| formData.location.toLowerCase() === 'online'}
+                      color="primary"
+                    >
+                      {isGettingLocation ? <CircularProgress size={20} /> : <LocationOnIcon />}
+                    </IconButton>
+                    </span>
                 </Tooltip>
                 <Tooltip title="Use my current location">
                  <IconButton

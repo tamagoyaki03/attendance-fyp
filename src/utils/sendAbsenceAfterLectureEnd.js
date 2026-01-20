@@ -1,325 +1,199 @@
 import supabase from "../config/supabaseClient";
 import { sendAbsenceNotificationEmails, getEmailSettings } from "./emailUtils";
 
-// Track sessions we've already processed today to prevent spam
-const processedSessionsToday = new Set();
+/**
+ * Periodically checks ended sessions and triggers absence email sending.
+ * This file ONLY detects absentees and calls Edge Functions.
+ */
+export async function sendAbsenceEmailsAfterLectureEnd(userId) {
+  const now = new Date();
+  const today = now.toISOString().split("T")[0];
+  const currentDay = now.getDay();
 
-// Reset processed sessions at midnight
-let lastResetDate = new Date().toDateString();
+  // ---------------------------
+  // 1. Fetch lectures & tutorials
+  // ---------------------------
+  const [{ data: lectures }, { data: tutorials }] = await Promise.all([
+    supabase
+      .from("course_lecture")
+      .select("id, course_code, course_title, lecture_end_time, lecturer_id, day_of_week")
+      .eq("lecturer_id", userId),
 
-function checkAndResetProcessedSessions() {
-  const today = new Date().toDateString();
-  if (today !== lastResetDate) {
-    processedSessionsToday.clear();
-    lastResetDate = today;
-  }
+    supabase
+      .from("course_tutorial")
+      .select("id, course_code, course_title, tutorial_end_time, lecturer_id, day_of_week")
+      .eq("lecturer_id", userId),
+  ]);
+
+  // ---------------------------
+  // 2. Process both types
+  // ---------------------------
+  await Promise.all([
+    ...(lectures || []).map(l =>
+      processClass({
+        type: "lecture",
+        classData: l,
+        endTimeField: "lecture_end_time",
+        enrollmentTable: "enrollment_lecture",
+        enrollmentKey: "course_id",
+        attendanceKey: "lecture_enrollment_id",
+        sessionKey: "course_lecture_id",
+        userId,
+        now,
+        today,
+        currentDay,
+      })
+    ),
+
+    ...(tutorials || []).map(t =>
+      processClass({
+        type: "tutorial",
+        classData: t,
+        endTimeField: "tutorial_end_time",
+        enrollmentTable: "enrollment_tutorial",
+        enrollmentKey: "tutorial_id",
+        attendanceKey: "tutorial_enrollment_id",
+        sessionKey: "course_tutorial_id",
+        userId,
+        now,
+        today,
+        currentDay,
+      })
+    ),
+  ]);
 }
 
 /**
- * Checks if any attendance sessions have ended (course_lecture.lecture_end_time < now) and sends absence emails if not already sent.
- * Should be called periodically (e.g., via setInterval or useEffect in AttendanceManagementPage).
+ * Handles one lecture/tutorial generically
  */
-export async function sendAbsenceEmailsAfterLectureEnd(userId) {
-  checkAndResetProcessedSessions();
-  const now = new Date();
-  
-  // 1. Get all lectures for this lecturer
-  const { data: lectures, error: lectureError } = await supabase
-    .from("course_lecture")
-    .select("id, course_code, course_title, lecture_end_time, lecturer_id, day_of_week")
-    .eq("lecturer_id", userId);
-  if (lectureError) {
-    return;
-  }
+async function processClass({
+  type,
+  classData,
+  endTimeField,
+  enrollmentTable,
+  enrollmentKey,
+  attendanceKey,
+  sessionKey,
+  userId,
+  now,
+  today,
+  currentDay,
+}) {
+  if (!classData[endTimeField]) return;
+  if (classData.day_of_week !== currentDay) return;
 
-  // 2. Get all tutorials for this lecturer
-  const { data: tutorials, error: tutorialError } = await supabase
-    .from("course_tutorial")
-    .select("id, course_code, course_title, tutorial_end_time, lecturer_id, day_of_week")
-    .eq("lecturer_id", userId);
-  if (tutorialError) {
-    return;
-  }
+  const [h, m, s] = classData[endTimeField].split(":").map(Number);
+  const endDate = new Date(now);
+  endDate.setHours(h, m, s || 0, 0);
 
-  // Process lectures
-  for (const lecture of lectures || []) {
-    if (!lecture.lecture_end_time) continue;
-    
-    // Check if today is the class day
-    const currentDay = now.getDay();
-    if (lecture.day_of_week !== currentDay) continue;
-    
-    // Parse lecture_end_time as today (assume format HH:mm:ss)
-    const [h, m, s] = lecture.lecture_end_time.split(":").map(Number);
-    const endDate = new Date(now);
-    endDate.setHours(h, m, s || 0, 0);
-    
-    // Only send emails if end_time has been reached AND within 1 hour after
-    if (now <= endDate) continue; // Not ended yet
-    
-    const oneHourAfterEnd = new Date(endDate.getTime() + 60 * 60 * 1000);
-    if (now > oneHourAfterEnd) continue; // More than 1 hour has passed
-    
-    // Find attendance_session for this lecture TODAY
-    const today = now.toISOString().split('T')[0];
-    const { data: sessions, error: sessionError } = await supabase
-      .from("attendance_session")
-      .select("id, created_at")
-      .eq("course_lecture_id", lecture.id)
-      .eq("date", today);
-      
-    if (sessionError || !sessions || sessions.length === 0) continue;
-    
-    for (const session of sessions) {
-      // Check in-memory cache first to prevent spam
-      if (processedSessionsToday.has(session.id)) {
-        continue;
-      }
-      
-      // Check if absence emails already sent
-      const { data: emailsSent, error: emailLogError } = await supabase
-        .from("absence_emails")
-        .select("id")
-        .eq("session_id", session.id);
-      
-      if (emailLogError) {
-        continue;
-      }
-      
-      if (emailsSent && emailsSent.length > 0) {
-        processedSessionsToday.add(session.id); // Add to cache
-        continue; // Already sent
-      }
-      
-      
-      // Get enrolled students
-      const { data: enrolled, error: enrollError } = await supabase
-        .from("enrollment_lecture")
-        .select("student_id, id")
-        .eq("course_id", lecture.id);
-      if (enrollError) continue;
-      
-      // Get present students AND flagged students (both should not receive absence emails)
-      const { data: presentRecords, error: presentError } = await supabase
-        .from("attendance_record")
-        .select("lecture_enrollment_id, status")
-        .eq("session_id", session.id)
-        .in("status", ["present", "flagged"]);
-      if (presentError) continue;
-      
-      const presentOrFlaggedEnrollmentIds = (presentRecords || []).map(r => r.lecture_enrollment_id);
-      
-      // Find absent students (exclude present and flagged)
-      const absentEnrollments = (enrolled || []).filter(e => !presentOrFlaggedEnrollmentIds.includes(e.id));
-      const absentIds = absentEnrollments.map(e => e.student_id);
-      
-      if (absentIds.length === 0) continue;
-      
-      // Check for approved MC submissions for this session or date
-      const sessionDate = session.created_at ? new Date(session.created_at).toISOString().split('T')[0] : today;
-      const { data: approvedMCs } = await supabase
+  const windowMs = type === "lecture" ? 60 * 60 * 1000 : 10 * 60 * 1000;
+  if (now <= endDate || now > new Date(endDate.getTime() + windowMs)) return;
+
+  // ---------------------------
+  // Find sessions today
+  // ---------------------------
+  const { data: sessions } = await supabase
+    .from("attendance_session")
+    .select("id, created_at")
+    .eq(sessionKey, classData.id)
+    .eq("date", today);
+
+  if (!sessions?.length) return;
+
+  for (const session of sessions) {
+    // ---------------------------
+    // Get enrollments
+    // ---------------------------
+    const { data: enrolled } = await supabase
+      .from(enrollmentTable)
+      .select("id, student_id")
+      .eq(enrollmentKey, classData.id);
+
+    if (!enrolled?.length) continue;
+
+    // ---------------------------
+    // Attendance records
+    // ---------------------------
+    const { data: attendance } = await supabase
+      .from("attendance_record")
+      .select(`${attendanceKey}, status`)
+      .eq("session_id", session.id);
+
+    const statusMap = new Map();
+    (attendance || []).forEach(r =>
+      statusMap.set(r[attendanceKey], r.status)
+    );
+
+    console.log("ENROLLED:", enrolled); // All enrolled students
+    console.log("ATTENDANCE RECORDS:", attendance); // All attendance records for the session
+
+    // ---------------------------
+    // Absence logic (PHYSICAL + ONLINE)
+    // ---------------------------
+    const absentStudents = enrolled.filter(e => {
+      const status = statusMap.get(e.id);
+      if (!status) return true;        // physical
+      if (status === "absent") return true; // online
+      return false;
+    });
+
+    console.log("ABSENT STUDENTS:", absentStudents); // All detected absentees
+    console.log("ABSENT IDS:", absentStudents.map(s => s.student_id)); // IDs of absentees
+
+    if (!absentStudents.length) continue;
+
+    // ---------------------------
+    // Exclude MC + Leave
+    // ---------------------------
+    const absentIds = absentStudents.map(s => s.student_id);
+    const sessionDate =
+      session.created_at?.split("T")[0] ?? today;
+
+    const [{ data: mcs }, { data: leaves }] = await Promise.all([
+      supabase
         .from("mc_submissions")
         .select("student_id")
         .in("student_id", absentIds)
         .eq("status", "approved")
-        .or(`session_id.eq.${session.id},absence_date.eq.${sessionDate}`);
-      
-      // Check for approved leave requests covering this date
-      const { data: approvedLeaves } = await supabase
-        .from("leave_requests")
-        .select("user_id, date_time")
-        .in("user_id", absentIds)
-        .eq("status", "approved")
-        .gte("date_time", `${sessionDate}T00:00:00`)
-        .lte("date_time", `${sessionDate}T23:59:59`);
-      
-      // Exclude students with approved MCs or leave requests
-      const studentsWithMC = (approvedMCs || []).map(mc => mc.student_id);
-      const studentsWithLeave = (approvedLeaves || []).map(leave => leave.user_id);
-      const excludedStudents = [...new Set([...studentsWithMC, ...studentsWithLeave])];
-      const absentIdsWithoutMC = absentIds.filter(id => !excludedStudents.includes(id));
-      
-      if (absentIdsWithoutMC.length === 0) {
-        continue;
-      }
-      
-      // Get absent students' emails (excluding those with approved MCs)
-      const { data: users, error: userError } = await supabase
-        .from("users")
-        .select("id, email, name, matric_number")
-        .in("id", absentIdsWithoutMC);
-      if (userError) continue;
-      
-      // Get email template
-      const emailSettings = await getEmailSettings(lecture.lecturer_id);
-      
-      // Send emails
-      await sendAbsenceNotificationEmails(users, lecture, emailSettings.emailTemplate, lecture.lecturer_id, session.id);
-      
-      // Log sent
-      for (const student of users) {
-        // Check if already logged to prevent duplicates
-        const { data: existing } = await supabase
-          .from("absence_emails")
-          .select("id")
-          .eq("student_id", student.id)
-          .eq("session_id", session.id)
-          .single();
-        
-        if (existing) {
-          continue;
-        }
-        
-        await supabase.from("absence_emails").insert({
-          student_id: student.id,
-          lecturer_id: lecture.lecturer_id,
-          session_id: session.id
-        });
-      }
-      
-      // Mark session as processed to prevent duplicate sends
-      processedSessionsToday.add(session.id);
-      
-    }
-  }
+        .eq("session_id", session.id),
 
-  // Process tutorials
-  for (const tutorial of tutorials || []) {
-    if (!tutorial.tutorial_end_time) continue;
-    
-    // Check if today is the class day
-    const currentDay = now.getDay();
-    if (tutorial.day_of_week !== currentDay) continue;
-    
-    // Parse tutorial_end_time as today (assume format HH:mm:ss)
-    const [h, m, s] = tutorial.tutorial_end_time.split(":").map(Number);
-    const endDate = new Date(now);
-    endDate.setHours(h, m, s || 0, 0);
-    
-    // Only send emails if end_time has been reached AND within 10 minutes after
-    if (now <= endDate) continue; // Not ended yet
-    
-    const tenMinutesAfterEnd = new Date(endDate.getTime() + 10 * 60 * 1000);
-    if (now > tenMinutesAfterEnd) continue; // More than 10 minutes has passed
-    
-    // Find attendance_session for this tutorial TODAY
-    const today = now.toISOString().split('T')[0];
-    const { data: sessions, error: sessionError } = await supabase
-      .from("attendance_session")
-      .select("id, created_at")
-      .eq("course_tutorial_id", tutorial.id)
-      .eq("date", today);
-      
-    if (sessionError || !sessions || sessions.length === 0) continue;
-    
-    for (const session of sessions) {
-      // Check in-memory cache first to prevent spam
-      if (processedSessionsToday.has(session.id)) {
-        continue;
-      }
-      
-      // Check if absence emails already sent
-      const { data: emailsSent, error: emailLogError } = await supabase
-        .from("absence_emails")
-        .select("id")
-        .eq("session_id", session.id);
-      
-      if (emailLogError) {
-        continue;
-      }
-      
-      if (emailsSent && emailsSent.length > 0) {
-        processedSessionsToday.add(session.id); // Add to cache
-        continue; // Already sent
-      }
-      
-      
-      // Get enrolled students
-      const { data: enrolled, error: enrollError } = await supabase
-        .from("enrollment_tutorial")
-        .select("student_id, id")
-        .eq("tutorial_id", tutorial.id);
-      if (enrollError) continue;
-      
-      // Get present students AND flagged students (both should not receive absence emails)
-      const { data: presentRecords, error: presentError } = await supabase
-        .from("attendance_record")
-        .select("tutorial_enrollment_id, status")
-        .eq("session_id", session.id)
-        .in("status", ["present", "flagged"]);
-      if (presentError) continue;
-      
-      const presentOrFlaggedEnrollmentIds = (presentRecords || []).map(r => r.tutorial_enrollment_id);
-      
-      // Find absent students (exclude present and flagged)
-      const absentEnrollments = (enrolled || []).filter(e => !presentOrFlaggedEnrollmentIds.includes(e.id));
-      const absentIds = absentEnrollments.map(e => e.student_id);
-      
-      if (absentIds.length === 0) continue;
-      
-      // Check for approved MC submissions for this session or date
-      const sessionDate = session.created_at ? new Date(session.created_at).toISOString().split('T')[0] : today;
-      const { data: approvedMCs } = await supabase
-        .from("mc_submissions")
-        .select("student_id")
-        .in("student_id", absentIds)
-        .eq("status", "approved")
-        .or(`session_id.eq.${session.id},absence_date.eq.${sessionDate}`);
-      
-      // Check for approved leave requests covering this date
-      const { data: approvedLeaves } = await supabase
+      supabase
         .from("leave_requests")
-        .select("user_id, date_time")
+        .select("user_id")
         .in("user_id", absentIds)
         .eq("status", "approved")
-        .gte("date_time", `${sessionDate}T00:00:00`)
-        .lte("date_time", `${sessionDate}T23:59:59`);
-      
-      // Exclude students with approved MCs or leave requests
-      const studentsWithMC = (approvedMCs || []).map(mc => mc.student_id);
-      const studentsWithLeave = (approvedLeaves || []).map(leave => leave.user_id);
-      const excludedStudents = [...new Set([...studentsWithMC, ...studentsWithLeave])];
-      const absentIdsWithoutMC = absentIds.filter(id => !excludedStudents.includes(id));
-      
-      if (absentIdsWithoutMC.length === 0) {
-        continue;
-      }
-      
-      // Get absent students' emails (excluding those with approved MCs)
-      const { data: users, error: userError } = await supabase
-        .from("users")
-        .select("id, email, name, matric_number")
-        .in("id", absentIdsWithoutMC);
-      if (userError) continue;
-      
-      // Get email template
-      const emailSettings = await getEmailSettings(tutorial.lecturer_id);
-      
-      // Send emails
-      await sendAbsenceNotificationEmails(users, tutorial, emailSettings.emailTemplate, tutorial.lecturer_id, session.id);
-      
-      // Log sent
-      for (const student of users) {        // Check if already logged to prevent duplicates
-        const { data: existing } = await supabase
-          .from("absence_emails")
-          .select("id")
-          .eq("student_id", student.id)
-          .eq("session_id", session.id)
-          .single();
-        
-        if (existing) {
-          continue;
-        }
-        await supabase.from("absence_emails").insert({
-          student_id: student.id,
-          lecturer_id: tutorial.lecturer_id,
-          session_id: session.id
-        });
-      }
-      
-      // Mark session as processed to prevent duplicate sends
-      processedSessionsToday.add(session.id);
-      
-    }
+        .eq("session_id", session.id)
+    ]);
+
+    const excluded = new Set([
+      ...(mcs || []).map(m => m.student_id),
+      ...(leaves || []).map(l => l.user_id),
+    ]);
+
+    const finalAbsentIds = absentIds.filter(id => !excluded.has(id));
+    if (!finalAbsentIds.length) continue;
+
+    console.log("EXCLUDED IDS (MC/Leave):", Array.from(excluded));
+    console.log("FINAL ABSENT IDS:", finalAbsentIds);
+
+    // ---------------------------
+    // Fetch users + send
+    // ---------------------------
+    const { data: users } = await supabase
+      .from("users")
+      .select("id, email, name, matric_number")
+      .in("id", finalAbsentIds);
+
+    if (!users?.length) continue;
+
+    const emailSettings = await getEmailSettings(classData.lecturer_id);
+
+    await sendAbsenceNotificationEmails(
+      users,
+      classData,
+      emailSettings.emailTemplate,
+      classData.lecturer_id,
+      session.id
+    );
   }
 }
