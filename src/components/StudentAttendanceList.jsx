@@ -356,7 +356,7 @@ export default function StudentAttendanceList({ classData, onSelectStudent, onFl
                 </TableCell>
                 <TableCell align="right">
                   <Box display="flex" gap={1} justifyContent="flex-end">
-                    {(!student.isFlagged && !student.flag_reason) && (
+                    {/* {(!student.isFlagged && !student.flag_reason) && (
                       <Button
                         variant="outlined"
                         size="small"
@@ -366,7 +366,7 @@ export default function StudentAttendanceList({ classData, onSelectStudent, onFl
                       >
                         Flag
                       </Button>
-                    )}
+                    )} */}
                     <ViewDetailsButton onClick={() => onSelectStudent(student)} />
                   </Box>
                 </TableCell>
