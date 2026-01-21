@@ -177,86 +177,86 @@ export default function StudentAttendanceList({ classData, onSelectStudent, onFl
     setFlagReasonDialog({ open: true, student });
   };
 
-  const handleConfirmFlag = async () => {
-    setFlagError("");
-    const student = flagReasonDialog.student;
-    setFlagReasonDialog({ open: false, student: null });
-    if (!student) return;
+  // const handleConfirmFlag = async () => {
+  //   setFlagError("");
+  //   const student = flagReasonDialog.student;
+  //   setFlagReasonDialog({ open: false, student: null });
+  //   if (!student) return;
 
 
-    // Debug: print student object and possible identifiers
-    let attendanceId = student.attendance_id;
-    let sessionId = student.session_id;
-    if (!sessionId && classData && classData.session_id) {
-      sessionId = classData.session_id;
-    }
+  //   // Debug: print student object and possible identifiers
+  //   let attendanceId = student.attendance_id;
+  //   let sessionId = student.session_id;
+  //   if (!sessionId && classData && classData.session_id) {
+  //     sessionId = classData.session_id;
+  //   }
 
-    // If attendance_id is not present, try to fetch it from the database
-    if (!attendanceId && sessionId) {
-      // Use the correct enrollment field based on class type
-      let filter = {};
-      if (classData?.type === "Lecture" && student.lecture_enrollment_id) {
-        filter = { lecture_enrollment_id: student.lecture_enrollment_id };
-      } else if (classData?.type === "Tutorial" && student.tutorial_enrollment_id) {
-        filter = { tutorial_enrollment_id: student.tutorial_enrollment_id };
-      }
-      if (Object.keys(filter).length > 0) {
-        const { data, error } = await supabase
-          .from('attendance_record')
-          .select('id')
-          .match({ ...filter, session_id: sessionId })
-          .maybeSingle();
-        if (!error && data && data.id) {
-          attendanceId = data.id;
-        }
-      }
-    }
+  //   // If attendance_id is not present, try to fetch it from the database
+  //   if (!attendanceId && sessionId) {
+  //     // Use the correct enrollment field based on class type
+  //     let filter = {};
+  //     if (classData?.type === "Lecture" && student.lecture_enrollment_id) {
+  //       filter = { lecture_enrollment_id: student.lecture_enrollment_id };
+  //     } else if (classData?.type === "Tutorial" && student.tutorial_enrollment_id) {
+  //       filter = { tutorial_enrollment_id: student.tutorial_enrollment_id };
+  //     }
+  //     if (Object.keys(filter).length > 0) {
+  //       const { data, error } = await supabase
+  //         .from('attendance_record')
+  //         .select('id')
+  //         .match({ ...filter, session_id: sessionId })
+  //         .maybeSingle();
+  //       if (!error && data && data.id) {
+  //         attendanceId = data.id;
+  //       }
+  //     }
+  //   }
 
-    // Update attendance_record status to 'flagged' and set flag_reason for this student in this session
-    let updateError = null;
-    if (attendanceId) {
-      const { error } = await supabase
-        .from('attendance_record')
-        .update({ status: 'flagged', flag_reason: flagReasonInput || 'Flagged by admin' })
-        .eq('id', attendanceId);
-      if (error) updateError = error;
-    } else {
-      updateError = 'Missing attendance identifier';
-    }
+  //   // Update attendance_record status to 'flagged' and set flag_reason for this student in this session
+  //   let updateError = null;
+  //   if (attendanceId) {
+  //     const { error } = await supabase
+  //       .from('attendance_record')
+  //       .update({ status: 'flagged', flag_reason: flagReasonInput || 'Flagged by admin' })
+  //       .eq('id', attendanceId);
+  //     if (error) updateError = error;
+  //   } else {
+  //     updateError = 'Missing attendance identifier';
+  //   }
 
-    if (updateError) {
-      setFlagError('Failed to update attendance status: ' + (updateError.message || updateError));
-      return;
-    }
+  //   if (updateError) {
+  //     setFlagError('Failed to update attendance status: ' + (updateError.message || updateError));
+  //     return;
+  //   }
 
-    // Try to retrieve userId
-    const userId = student.student_id || student.id;
-    // Try to get attendance_record_id for this flag
-    let attendanceRecordId = attendanceId;
-    if (!attendanceRecordId && student.attendance_record && student.attendance_record.id) {
-      attendanceRecordId = student.attendance_record.id;
-    }
-    if (userId && sessionId) {
-      await supabase
-        .from('fraud_detection_alerts')
-        .insert({
-          user_id: userId,
-          session_id: sessionId,
-          attendance_record_id: attendanceRecordId || null,
-          alert_type: 'Flagged',
-          description: flagReasonInput || 'Flagged by admin',
-          status: 'open',
-          severity: 'medium',
-          created_at: new Date().toISOString(),
-        });
-      // Ask parent to refresh data so flagged list updates
-      if (onFlagged) onFlagged();
-    } else {
-      setFlagError('Cannot flag: missing session ID for this student.');
-    }
-    setFlagReasonDialog({ open: false, student: null });
-    setFlagReasonInput('');
-  };
+  //   // Try to retrieve userId
+  //   const userId = student.student_id || student.id;
+  //   // Try to get attendance_record_id for this flag
+  //   let attendanceRecordId = attendanceId;
+  //   if (!attendanceRecordId && student.attendance_record && student.attendance_record.id) {
+  //     attendanceRecordId = student.attendance_record.id;
+  //   }
+  //   if (userId && sessionId) {
+  //     await supabase
+  //       .from('fraud_detection_alerts')
+  //       .insert({
+  //         user_id: userId,
+  //         session_id: sessionId,
+  //         attendance_record_id: attendanceRecordId || null,
+  //         alert_type: 'Flagged',
+  //         description: flagReasonInput || 'Flagged by admin',
+  //         status: 'open',
+  //         severity: 'medium',
+  //         created_at: new Date().toISOString(),
+  //       });
+  //     // Ask parent to refresh data so flagged list updates
+  //     if (onFlagged) onFlagged();
+  //   } else {
+  //     setFlagError('Cannot flag: missing session ID for this student.');
+  //   }
+  //   setFlagReasonDialog({ open: false, student: null });
+  //   setFlagReasonInput('');
+  // };
 
   return (
     <div>
@@ -283,7 +283,7 @@ export default function StudentAttendanceList({ classData, onSelectStudent, onFl
             />
             <Box display="flex" justifyContent="flex-end" gap={1}>
               <Button onClick={() => setFlagReasonDialog({ open: false, student: null })} variant="outlined">Cancel</Button>
-              <Button onClick={handleConfirmFlag} variant="contained" disabled={!flagReasonInput.trim()}>Flag</Button>
+              {/* <Button onClick={handleConfirmFlag} variant="contained" disabled={!flagReasonInput.trim()}>Flag</Button> */}
             </Box>
           </Paper>
         </Box>
