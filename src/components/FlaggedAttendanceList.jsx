@@ -569,9 +569,6 @@ export default function FlaggedAttendanceList({ students = [], session, sessionI
                                 <LocationOn color={locationInfo.isWithinRange ? 'success' : 'warning'} fontSize="small" />
                                 <Typography variant="body2">
                                   Distance from class location: <b>{locationInfo.distance.toFixed(2)} km</b>
-                                  {locationInfo.isWithinRange
-                                    ? " (Within acceptable range)"
-                                    : " (Outside typical range)"}
                                 </Typography>
                               </Box>
                             </Box>

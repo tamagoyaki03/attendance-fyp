@@ -699,10 +699,6 @@ export default function StudentDetailsCard({ student, open, onClose, classData }
                                {locationInfo.isWithinRange ? "Location Verified" : "Location Warning"}
                              </AlertTitle>
                              Distance from class location: {locationInfo.distance.toFixed(2)} km
-                             {locationInfo.isWithinRange
-                               ? " (Within acceptable range)"
-                               : " (Outside typical range)"
-                             }
                            </Alert>
 
                            <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2}>
